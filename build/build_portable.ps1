@@ -43,7 +43,10 @@ Remove-Item -Recurse -Force $Out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Out, "$Out\runtime", "$Out\hermes-agent", "$Out\home" | Out-Null
 
 # 3) copy full standalone CPython runtime
-Copy-Item -Recurse -Force "$pyPrefix\*" "$Out\runtime\python\"
+$pyDest = "$Out\runtime\python"
+if (Test-Path $pyDest) { Remove-Item -Recurse -Force $pyDest }
+New-Item -ItemType Directory -Force -Path $pyDest | Out-Null
+Copy-Item -Recurse -Force "$pyPrefix\*" $pyDest
 
 # 4) copies venv => interpreter is a real file, not a symlink out
 & "$Out\runtime\python\python.exe" -m venv --copies "$Out\hermes-agent\venv"
