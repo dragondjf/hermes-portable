@@ -44,14 +44,32 @@ telemetry:
 '@ | sc "$DIR\home\config.yaml"
 Write-Host "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path
-$OLD = (Select-String -Path "$SP\__editable__*.py" -Pattern '([A-Za-z]:\\[\\a-zA-Z0-9_.\-]+)\\hermes-agent' -List |
-        Select-Object -First 1).Matches.Groups[1].Value
-if ($OLD -and $OLD -ne "$DIR\hermes-agent") {
-  Get-ChildItem "$SP\__editable__*.py","$SP\hermes_agent-*.dist-info\direct_url.json" -ErrorAction SilentlyContinue |
-    % { (gc $_.FullName) -replace [regex]::Escape($OLD), "$DIR\hermes-agent" | sc $_.FullName }
-  Write-Host "    [ok] editable metadata path -> $DIR\hermes-agent"
-} else { Write-Host "    [skip] editable metadata already correct" }
+# 4) rewrite editable metadata absolute path -> deploy path (robust, mirrors install.sh)
+#    The editable finder records the hermes-agent source dir; on relocation it must
+#    point at the deployed copy. Use Python so deep paths (D:\a\...\hermes-agent) and
+#    both MAPPING/NAMESPACES entries are rewritten, and bytes are preserved.
+& "$VENV\Scripts\python.exe" - "$DIR" "$SP" <<'PY'
+import os, glob, re, sys
+DIR, SP = sys.argv[1], sys.argv[2]
+target = os.path.join(DIR, "hermes-agent").replace("/", "\\")
+changed = []
+for pat in (os.path.join(SP, "__editable__*.py"),
+            os.path.join(SP, "hermes_agent-*.dist-info", "direct_url.json")):
+    for f in glob.glob(pat):
+        t = open(f, encoding="utf-8").read()
+        m = re.search(r"[A-Za-z]:[\\/].+?[\\/]hermes-agent", t)
+        if not m:
+            continue
+        old = m.group(0).replace("/", "\\")
+        if old == target:
+            continue
+        open(f, "w", encoding="utf-8").write(t.replace(old, target))
+        changed.append(f)
+if changed:
+    print("    [ok] editable metadata path -> " + target)
+else:
+    print("    [skip] editable metadata already correct")
+PY
 
 # 5) clear stale pyc
 Get-ChildItem -Recurse -Force -Path $DIR -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
