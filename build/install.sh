@@ -11,16 +11,22 @@ SP="$VENV/lib/python3.11/site-packages"
 echo "==> Hermes portable installer (no root, no network)"
 echo "    Package dir: $DIR"
 
-# 1) pyvenv.cfg home -> bundled runtime (fixes 'No module named encodings')
-#    IMPORTANT: do NOT use $VENV/bin/python here — pyvenv.cfg still holds the
-#    __HERMES_RUNTIME_BIN__ placeholder, so that interpreter cannot start.
-#    Use sed -i.bak (works on both GNU and BSD/macOS sed).
-if [ -f "$PYVCFG" ] && grep -q '__HERMES_RUNTIME_BIN__' "$PYVCFG"; then
-  sed -i.bak "s#__HERMES_RUNTIME_BIN__#$RT_BIN#" "$PYVCFG"
+# 1) pyvenv.cfg -> bundled runtime (fixes 'No module named encodings' and makes
+#    the package relocatable). Rewrite UNCONDITIONALLY: the build may have left a
+#    __HERMES_RUNTIME_BIN__ placeholder OR a stale build-machine absolute path.
+#    Do NOT use $VENV/bin/python here — pyvenv.cfg may still point outside the
+#    package, so that interpreter cannot start yet. Use sed -i.bak (GNU + BSD).
+RT_BIN="$DIR/runtime/python/bin"
+if [ -f "$PYVCFG" ]; then
+  sed -i.bak "s#__HERMES_RUNTIME_BIN__#$RT_BIN#g" "$PYVCFG"
+  sed -i.bak -E "s#^home = .*#home = $RT_BIN#" "$PYVCFG"
+  sed -i.bak -E "s#^executable = .*#executable = $RT_BIN/python3.11#" "$PYVCFG"
+  sed -i.bak -E "/^command = /d" "$PYVCFG"
+  sed -i.bak -E "/^uv = /d" "$PYVCFG"
   rm -f "$PYVCFG.bak"
-  echo "    [ok] pyvenv.cfg home -> $RT_BIN"
+  echo "    [ok] pyvenv.cfg -> bundled runtime $RT_BIN"
 else
-  echo "    [skip] pyvenv.cfg already configured"
+  echo "    [warn] pyvenv.cfg missing"
 fi
 
 # 2) ensure uv binary present

@@ -78,6 +78,13 @@ jobs:
           bash install.sh
           bash hermes.sh version
 
+      - name: Green-package verification (relocatable + offline + isolated)
+        shell: bash
+        run: |
+          # TRUE green check: copy out of the build dir, run with a wiped env,
+          # assert correct deploy path, no external network, no system-dir writes.
+          bash build/verify_reloc.sh "$(pwd)/hermes-portable"
+
       - name: Package artifact
         shell: bash
         run: |
@@ -139,6 +146,13 @@ jobs:
           cd hermes-portable
           pwsh install.ps1
           pwsh hermes.ps1 version
+
+      - name: Green-package verification (relocatable + offline + isolated)
+        shell: pwsh
+        run: |
+          # TRUE green check on Windows: copy to a temp path, run with a wiped
+          # env, assert correct deploy path, and that no build-machine path leaked.
+          pwsh build/verify_reloc.ps1 -PackageDir "$(Get-Location)/hermes-portable"
 
       - name: Package artifact
         shell: pwsh

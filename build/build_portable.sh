@@ -42,14 +42,18 @@ if ! command -v uv >/dev/null 2>&1; then
   echo "uv not found — install it or prepend to PATH"; exit 1
 fi
 uv python install 3.11 >/dev/null
-PY_PREFIX="$(cd "$(dirname "$(uv python find 3.11 --no-project)")/.." && pwd)"
+PY_PREFIX="$(cd "$(dirname "$(uv python find 3.11 --no-project)")/.." && pwd -P)"
 echo "==> bundling python from $PY_PREFIX"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime" "$OUT/hermes-agent" "$OUT/home"
 
 # 3) copy full standalone CPython runtime (stdlib + bin)
-cp -a "$PY_PREFIX" "$OUT/runtime/python"
+#    Use `cp -aL` (-L = --dereference) so any symlink in uv's python dir
+#    (e.g. the cpython-3.11-<arch> symlink, or bin/python3 -> python3.11) is
+#    expanded to a real file. Without this the package ends up holding a
+#    symlink into uv's shared dir and is NOT self-contained.
+cp -aL "$PY_PREFIX" "$OUT/runtime/python"
 
 # 4) copies venv => interpreter is a real file, not a symlink out
 "$OUT/runtime/python/bin/python3" -m venv --copies "$OUT/hermes-agent/venv"
@@ -68,13 +72,19 @@ rsync -a --exclude='.git' --exclude='tests' --exclude='tests-js' \
 uv pip install --python "$OUT/hermes-agent/venv/bin/python" --no-build-isolation --no-cache-dir \
   -e "$OUT/hermes-agent/"
 
-# 8) placeholder pyvenv.cfg home; install.sh rewrites at deploy (python for cross-platform sed)
+# 8) placeholder pyvenv.cfg paths; install.sh rewrites at deploy.
+#    Placeholder BOTH `home`, `executable` AND `command` so the package is
+#    relocatable. __HERMES_RUNTIME_BIN__ is the bundled runtime dir; it is
+#    expanded by install.sh to the real (deploy-time) absolute path.
 PYVCFG="$OUT/hermes-agent/venv/pyvenv.cfg"
-"$OUT/runtime/python/bin/python3" - "$PYVCFG" <<'PY'
-import re, sys
-p = sys.argv[1]
+RT="__HERMES_RUNTIME_BIN__"
+"$OUT/runtime/python/bin/python3" - "$PYVCFG" "$RT" <<'PY'
+import sys, re
+p, rt = sys.argv[1], sys.argv[2]
 s = open(p, encoding="utf-8").read()
-s = re.sub(r'^home = .*', 'home = __HERMES_RUNTIME_BIN__', s, flags=re.M)
+s = re.sub(r'^home = .*', f'home = {rt}/bin', s, flags=re.M)
+s = re.sub(r'^executable = .*', f'executable = {rt}/bin/python3.11', s, flags=re.M)
+s = re.sub(r'^command = .*', '', s, flags=re.M)
 s = re.sub(r'^uv = .*\n', '', s, flags=re.M)
 open(p, "w", encoding="utf-8").write(s)
 PY
