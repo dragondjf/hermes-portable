@@ -83,9 +83,10 @@ $out | sc $pyv
 '' | sc "$Out\home\config.yaml"
 
 # 10) launcher + installer from repo build/ templates
-#     Use $env:GITHUB_WORKSPACE (auto-injected by Actions) — never rely on
-#     $MyInvocation/$PSScriptRoot which mis-resolve under CI pwsh invocation.
-$scriptDir = Join-Path $env:GITHUB_WORKSPACE 'build'
+#     Resolve the build/ dir relative to the repo root. $PWD is the directory
+#     pwsh was launched in (the checked-out repo root on CI) and is reliable.
+$scriptDir = Join-Path $PWD.Path 'build'
+Write-Host "==> scriptDir = $scriptDir"
 Copy-Item "$scriptDir\install.ps1" "$Out\install.ps1"
 Copy-Item "$scriptDir\hermes.ps1"  "$Out\hermes.ps1"
 
