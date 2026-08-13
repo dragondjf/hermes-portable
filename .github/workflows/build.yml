@@ -1,0 +1,161 @@
+name: build-portable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'hermes-agent git commit/branch/tag to package. Empty = main (latest).'
+        required: false
+        default: ''
+      version_label:
+        description: 'Human label for the release asset (e.g. 0.20.0). Empty = derived from tag/commit.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # needed to upload release assets
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux (x64 + arm64) and macOS — official installer + repackage.
+  # ---------------------------------------------------------------------------
+  unix:
+    name: ${{ matrix.runner }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+          - runner: macos-latest
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      HERMES_HOME: ${{ github.workspace }}/official-hermes
+    steps:
+      - name: Checkout this packaging repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 (base for uv) + uv
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.11.28'
+
+      - name: Resolve target commit/branch
+        id: tgt
+        shell: bash
+        run: |
+          C="${{ github.event.inputs.commit }}"
+          if [ -z "$C" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            C="${GITHUB_REF_NAME#v}"   # try tag name as version/commit hint
+          fi
+          echo "commit=${C:-main}" >> "$GITHUB_OUTPUT"
+          L="${{ github.event.inputs.version_label }}"
+          if [ -z "$L" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            L="${GITHUB_REF_NAME#v}"
+          fi
+          echo "label=${L:-ci}" >> "$GITHUB_OUTPUT"
+
+      - name: Official install (curl install.sh)
+        shell: bash
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+        run: |
+          curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
+            | bash -s -- --hermes-home "$HERMES_HOME" --commit "${{ steps.tgt.outputs.commit }}" --skip-setup --skip-browser
+
+      - name: Repackage into portable bundle
+        shell: bash
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+          OUT: ${{ github.workspace }}/hermes-portable
+        run: bash build/build_portable.sh
+
+      - name: Smoke test (install + version, offline)
+        shell: bash
+        run: |
+          cd hermes-portable
+          bash install.sh
+          bash hermes.sh version
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          tar czf "hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz" hermes-portable
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz
+
+  # ---------------------------------------------------------------------------
+  # Windows.
+  # ---------------------------------------------------------------------------
+  windows:
+    name: windows-latest (x64)
+    runs-on: windows-latest
+    env:
+      HERMES_HOME: ${{ github.workspace }}\official-hermes
+    steps:
+      - name: Checkout this packaging repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 (base for uv) + uv
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.11.28'
+
+      - name: Resolve target commit/branch
+        id: tgt
+        shell: pwsh
+        run: |
+          $C = "${{ github.event.inputs.commit }}"
+          if (-not $C -and "$env:GITHUB_REF_NAME" -match '^v') { $C = "$env:GITHUB_REF_NAME" -replace '^v','' }
+          echo "commit=$($C -or 'main')" >> $env:GITHUB_OUTPUT
+          $L = "${{ github.event.inputs.version_label }}"
+          if (-not $L -and "$env:GITHUB_REF_NAME" -match '^v') { $L = "$env:GITHUB_REF_NAME" -replace '^v','' }
+          echo "label=$($L -or 'ci')" >> $env:GITHUB_OUTPUT
+
+      - name: Official install (iex install.ps1)
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+        run: |
+          iex (irm https://hermes-agent.nousresearch.com/install.ps1) -Branch main -Commit "${{ steps.tgt.outputs.commit }}" -HermesHome "$env:HERMES_HOME" -SkipSetup
+
+      - name: Repackage into portable bundle
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+          OUT: ${{ github.workspace }}\hermes-portable
+        run: pwsh build/build_portable.ps1
+
+      - name: Smoke test (install + version, offline)
+        shell: pwsh
+        run: |
+          cd hermes-portable
+          pwsh install.ps1
+          pwsh hermes.ps1 version
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path hermes-portable -DestinationPath "hermes-portable-windows-latest-x64.zip"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: hermes-portable-windows-latest-x64.zip
