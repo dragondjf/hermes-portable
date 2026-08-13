@@ -86,14 +86,17 @@ $newLines | sc $pyv
 
 # Placeholderize the editable finder + direct_url build root so install.ps1 can
 # substitute the deploy path deterministically (no fragile build-path regex).
+# The editable finder may store paths with EITHER backslashes or forward slashes,
+# so replace both separator variants of the build hermes-agent root.
 $agentRoot = (Resolve-Path "$Out\hermes-agent").Path
+$agentRootFwd = $agentRoot.Replace("\", "/")
 Get-ChildItem "$Out\hermes-agent\venv\Lib\site-packages" -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
   ForEach-Object {
     $t = gc $_.FullName -Raw
-    if ($t -match [regex]::Escape($agentRoot)) {
-      ($t -replace [regex]::Escape($agentRoot), '__HERMES_AGENT_ROOT__') | sc $_.FullName
-    }
+    $t = $t -replace [regex]::Escape($agentRoot), '__HERMES_AGENT_ROOT__'
+    $t = $t -replace [regex]::Escape($agentRootFwd), '__HERMES_AGENT_ROOT__'
+    $t | sc $_.FullName
   }
 
 # 9) offline config placeholder

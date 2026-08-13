@@ -48,14 +48,22 @@ Write-Host "    [ok] offline config.yaml written"
 #    The build placeholderized the hermes-agent root as __HERMES_AGENT_ROOT__ in
 #    the editable finder + direct_url.json. Substitute the deploy path here.
 #    Deterministic (token-based), so it works regardless of build path format.
+#    Fallback: if a build path leaked without being tokenized, rewrite it too.
 $agentRootDeploy = (Join-Path $DIR "hermes-agent").Replace("\", "/")
 Get-ChildItem "$SP" -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
   ForEach-Object {
     $t = gc $_.FullName -Raw
+    $orig = $t
     if ($t -match '__HERMES_AGENT_ROOT__') {
-      ($t -replace '__HERMES_AGENT_ROOT__', $agentRootDeploy) | sc $_.FullName
+      $t = $t -replace '__HERMES_AGENT_ROOT__', $agentRootDeploy
     }
+    # Fallback: a literal build path (D:\a\... or /home/runner/...) pointing at
+    # hermes-agent — normalize and swap the prefix to the deploy path.
+    $t = $t -replace '\\', '/'
+    $t = $t -replace '[A-Za-z]:/.+?/hermes-agent', $agentRootDeploy
+    $t = $t -replace '/home/runner/.+?/hermes-agent', $agentRootDeploy
+    if ($t -ne $orig) { $t | sc $_.FullName }
   }
 Write-Host "    [ok] editable metadata path -> $agentRootDeploy"
 
