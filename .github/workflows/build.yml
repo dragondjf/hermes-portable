@@ -119,10 +119,10 @@ jobs:
           # passes -Arg to iex (which has no such param) and fails.
           # Official installer reads HERMES_HOME from the env (workflow sets it),
           # so we only pass the -SkipSetup switch. Download to a file and invoke
-          # with `&` — avoids iex param-binding and [scriptblock]::Create
-          # encoding pitfalls. -Encoding utf8 keeps the file parseable on Windows.
+          # with `&` — avoids iex param-binding pitfalls. (Invoke-RestMethod has
+          # no -Encoding, so we rely on its default UTF-8 output.)
           $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
-          irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1 -Encoding utf8
+          irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1
           & $installPs1 -SkipSetup
 
       - name: Repackage into portable bundle
