@@ -9,6 +9,10 @@ category: devops
 ## Support files (prefer these over retyping)
 - `scripts/build_portable.sh` — canonical, re-runnable build script. Copy to a
   machine with a working `hermes` install and run it; produces `~/hermes-portable/`.
+- `scripts/install.sh` — the deploy-time one-shot config (rewrites pyvenv.cfg,
+  writes offline config, fixes editable metadata + pyc). Bundled into the package.
+- `scripts/hermes.sh` — the launcher (sets HERMES_HOME + PATH, then runs the agent).
+  Bundled into the package.
 - `references/verification.md` — strace + `env -i` offline-proof recipe and the
   real-run gotchas (`kanban` positional `title`, `unshare -n` denied, etc.).
 
