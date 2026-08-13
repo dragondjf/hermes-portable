@@ -44,43 +44,20 @@ telemetry:
 '@ | sc "$DIR\home\config.yaml"
 Write-Host "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path (robust, mirrors install.sh)
-#    The editable finder records the hermes-agent source dir; on relocation it must
-#    point at the deployed copy. Use Python so deep paths (D:\a\...\hermes-agent) and
-#    both MAPPING/NAMESPACES entries are rewritten, and bytes are preserved.
-$rewritePy = Join-Path $DIR "home\bin\_rewrite_editable.py"
-New-Item -ItemType Directory -Force -Path (Split-Path $rewritePy) | Out-Null
-@'
-import os, glob, re, sys
-DIR, SP = sys.argv[1], sys.argv[2]
-target = os.path.join(DIR, "hermes-agent").replace("\\", "/")
-changed = []
-for pat in (os.path.join(SP, "__editable__*.py"),
-            os.path.join(SP, "__editable__*.pth"),
-            os.path.join(SP, "hermes_agent-*.dist-info", "direct_url.json")):
-    for f in glob.glob(pat):
-        t = open(f, encoding="utf-8").read()
-        # Normalize to forward slashes so backslash build paths (D:\a\...) match
-        # consistently on Windows.
-        t_norm = t.replace("\\", "/")
-        m = re.search(r"[A-Za-z]:/.+?/hermes-agent", t_norm)
-        if not m:
-            continue
-        # Replace the WHOLE build root (everything up to and including
-        # /hermes-agent), not just the matched substring, so MAPPING,
-        # NAMESPACES, and direct_url entries all relocate.
-        old_root = m.group(0)
-        if old_root == target:
-            continue
-        open(f, "w", encoding="utf-8").write(t_norm.replace(old_root, target))
-        changed.append(f)
-if changed:
-    print("    [ok] editable metadata path -> " + target)
-else:
-    print("    [skip] editable metadata already correct")
-'@ | Set-Content -NoNewline $rewritePy
-& "$VENV\Scripts\python.exe" $rewritePy "$DIR" "$SP"
-Remove-Item -Force $rewritePy -ErrorAction SilentlyContinue
+# 4) rewrite editable metadata absolute path -> deploy path
+#    The build placeholderized the hermes-agent root as __HERMES_AGENT_ROOT__ in
+#    the editable finder + direct_url.json. Substitute the deploy path here.
+#    Deterministic (token-based), so it works regardless of build path format.
+$agentRootDeploy = (Join-Path $DIR "hermes-agent").Replace("\", "/")
+Get-ChildItem "$SP" -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
+  ForEach-Object {
+    $t = gc $_.FullName -Raw
+    if ($t -match '__HERMES_AGENT_ROOT__') {
+      ($t -replace '__HERMES_AGENT_ROOT__', $agentRootDeploy) | sc $_.FullName
+    }
+  }
+Write-Host "    [ok] editable metadata path -> $agentRootDeploy"
 
 # 5) clear stale pyc
 Get-ChildItem -Recurse -Force -Path $DIR -Directory -Filter __pycache__ | Remove-Item -Recurse -Force

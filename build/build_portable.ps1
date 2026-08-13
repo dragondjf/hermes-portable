@@ -69,9 +69,9 @@ robocopy "$SRC" "$Out\hermes-agent" /E /XD $excl /XF *.pyc | Out-Null
 # 7) re-establish editable install of hermes-agent inside the bundle
 & "$Out\hermes-agent\venv\Scripts\pip.exe" install --no-build-isolation --no-cache-dir -e "$Out\hermes-agent"
 
-# 8) placeholder/strip pyvenv.cfg build paths; install.ps1 rewrites at deploy
-#    NOTE: PowerShell is case-INsensitive, so a local `$out` would clobber the
-#    `$Out` output-dir param. Use a distinctly-named buffer.
+# 8) placeholder pyvenv.cfg + editable metadata build paths; install.ps1 rewrites
+#    at deploy. NOTE: PowerShell is case-INsensitive, so a local `$out` would
+#    clobber the `$Out` output-dir param. Use a distinctly-named buffer.
 $pyv = "$Out\hermes-agent\venv\pyvenv.cfg"
 $rtBin = "__HERMES_RUNTIME_BIN__"
 $lines = gc $pyv
@@ -83,6 +83,18 @@ $newLines = $lines | % {
   else { $_ }
 }
 $newLines | sc $pyv
+
+# Placeholderize the editable finder + direct_url build root so install.ps1 can
+# substitute the deploy path deterministically (no fragile build-path regex).
+$agentRoot = (Resolve-Path "$Out\hermes-agent").Path
+Get-ChildItem "$Out\hermes-agent\venv\Lib\site-packages" -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
+  ForEach-Object {
+    $t = gc $_.FullName -Raw
+    if ($t -match [regex]::Escape($agentRoot)) {
+      ($t -replace [regex]::Escape($agentRoot), '__HERMES_AGENT_ROOT__') | sc $_.FullName
+    }
+  }
 
 # 9) offline config placeholder
 '' | sc "$Out\home\config.yaml"
