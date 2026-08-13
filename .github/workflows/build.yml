@@ -130,6 +130,7 @@ jobs:
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
           OUT: ${{ github.workspace }}\hermes-portable
+          SCRIPT_DIR: ${{ github.workspace }}\build
         run: pwsh build/build_portable.ps1
 
       - name: Smoke test (install + version, offline)
