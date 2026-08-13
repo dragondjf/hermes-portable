@@ -20,6 +20,8 @@ rm -rf "$RELOC"
 mkdir -p "$RELOC"
 cp -a "$PKG/." "$RELOC/hermes-portable/"
 PKG="$RELOC/hermes-portable"
+# Re-normalize: on macOS /tmp -> /private/tmp, and hermes reports the real path.
+PKG="$(cd "$PKG" && pwd -P)"
 
 bash "$PKG/install.sh"
 

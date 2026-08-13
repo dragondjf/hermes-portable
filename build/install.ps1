@@ -10,14 +10,20 @@ $SP = "$VENV\Lib\site-packages"
 Write-Host "==> Hermes portable installer (no admin, no network)"
 Write-Host "    Package dir: $DIR"
 
-# 1) pyvenv.cfg home -> bundled runtime (fixes 'No module named encodings')
+# 1) pyvenv.cfg -> bundled runtime (fixes 'No module named encodings' and makes
+#    the package relocatable). Rewrite UNCONDITIONALLY: the build may have left a
+#    __HERMES_RUNTIME_BIN__ placeholder OR a stale build-machine absolute path,
+#    and we must not skip when the path is wrong. (Same fix as install.sh on unix.)
 if (Test-Path $PYVCFG) {
   $txt = gc $PYVCFG
-  if ($txt -match '__HERMES_RUNTIME_BIN__') {
-    $txt -replace '__HERMES_RUNTIME_BIN__', $RT_BIN | sc $PYVCFG
-    Write-Host "    [ok] pyvenv.cfg home -> $RT_BIN"
-  } else { Write-Host "    [skip] pyvenv.cfg already configured" }
-}
+  $txt = $txt -replace '__HERMES_RUNTIME_BIN__', $RT_BIN
+  $txt = $txt -replace '^home = .*', "home = $RT_BIN"
+  $txt = $txt -replace '^executable = .*', "executable = $RT_BIN\python.exe"
+  $txt = $txt -replace '^command = .*', ''
+  $txt = $txt -replace '^uv = .*', ''
+  $txt | sc $PYVCFG
+  Write-Host "    [ok] pyvenv.cfg -> bundled runtime $RT_BIN"
+} else { Write-Host "    [warn] pyvenv.cfg missing" }
 
 # 2) ensure uv binary present
 New-Item -ItemType Directory -Force -Path "$DIR\home\bin" | Out-Null
