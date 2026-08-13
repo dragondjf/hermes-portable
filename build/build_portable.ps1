@@ -70,14 +70,16 @@ robocopy "$SRC" "$Out\hermes-agent" /E /XD $excl /XF *.pyc | Out-Null
 & "$Out\hermes-agent\venv\Scripts\pip.exe" install --no-build-isolation --no-cache-dir -e "$Out\hermes-agent"
 
 # 8) placeholder pyvenv.cfg home; install.ps1 rewrites at deploy
+#    NOTE: PowerShell is case-INsensitive, so a local `$out` would clobber the
+#    `$Out` output-dir param. Use a distinctly-named buffer.
 $pyv = "$Out\hermes-agent\venv\pyvenv.cfg"
 $lines = gc $pyv
-$out = $lines | % {
+$newLines = $lines | % {
   if ($_ -match '^home = ') { 'home = __HERMES_RUNTIME_BIN__' }
   elseif ($_ -match '^uv = ') { $null }
   else { $_ }
 }
-$out | sc $pyv
+$newLines | sc $pyv
 
 # 9) offline config placeholder
 '' | sc "$Out\home\config.yaml"
