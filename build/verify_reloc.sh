@@ -38,14 +38,24 @@ echo "$OUT" | grep -q "Hermes Agent v" || { echo "FAIL: version not printed"; ex
 
 echo "==> strace: assert no external network + no system-dir writes"
 TRACE=/tmp/hermes-reloc-trace.txt
-strace -f -e trace=network,file -o "$TRACE" $RUN version >/dev/null 2>&1 || true
-# NOTE: under `set -o pipefail`, an empty grep returns 1, so guard with || true.
-EXT=$(grep 'connect(' "$TRACE" | grep -vE 'AF_UNIX|127\.0\.0\.1|::1' | wc -l || true)
-SYS=$(grep -E 'openat.*(O_WRONLY|O_CREAT|O_RDWR).*(/etc/|/usr/|/opt/|/root/|/var/)' "$TRACE" | wc -l || true)
-echo "external connect()  = $EXT (must be 0)"
-echo "system-dir writes   = $SYS (must be 0)"
-[ "$EXT" = "0" ] || { echo "FAIL: package made external network calls"; exit 1; }
-[ "$SYS" = "0" ] || { echo "FAIL: package wrote to system dirs"; exit 1; }
+rm -f "$TRACE"
+if command -v strace >/dev/null 2>&1; then
+  strace -f -e trace=network,file -o "$TRACE" $RUN version >/dev/null 2>&1 || true
+  if [ -f "$TRACE" ]; then
+    # NOTE: under `set -o pipefail` an empty grep returns 1, so guard with || true.
+    # `wc -l` pads with spaces on BSD/macOS — trim it.
+    EXT=$(grep 'connect(' "$TRACE" | grep -vE 'AF_UNIX|127\.0\.0\.1|::1' | wc -l | tr -d ' ' || true)
+    SYS=$(grep -E 'openat.*(O_WRONLY|O_CREAT|O_RDWR).*(/etc/|/usr/|/opt/|/root/|/var/)' "$TRACE" | wc -l | tr -d ' ' || true)
+    echo "external connect()  = $EXT (must be 0)"
+    echo "system-dir writes   = $SYS (must be 0)"
+    [ "$EXT" = "0" ] || { echo "FAIL: package made external network calls"; exit 1; }
+    [ "$SYS" = "0" ] || { echo "FAIL: package wrote to system dirs"; exit 1; }
+  else
+    echo "    [warn] strace produced no trace file; skipping network assertion"
+  fi
+else
+  echo "    [warn] strace unavailable on this platform; skipping network assertion"
+fi
 
 echo "==> functional offline test (kanban SQLite persists)"
 $RUN kanban init >/dev/null 2>&1 || true
