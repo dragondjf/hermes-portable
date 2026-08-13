@@ -121,9 +121,13 @@ jobs:
           if ("${{ github.event.inputs.hermes_ref }}") {
             $commitArg = "-Commit ""${{ github.event.inputs.hermes_ref }}""
           }
-          $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
-          irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1
-          & $installPs1 -HermesHome "$env:HERMES_HOME" $commitArg -SkipSetup
+          # Download the installer, turn it into a scriptblock, and invoke it with
+          # `&` so named params (-HermesHome) reach the script (not iex). Using
+          # [scriptblock]::Create avoids file-encoding/ParserError issues with
+          # `& downloadedFile.ps1` on Windows runners.
+          $installScript = irm https://hermes-agent.nousresearch.com/install.ps1
+          $sb = [scriptblock]::Create($installScript)
+          & $sb -HermesHome $env:HERMES_HOME $commitArg -SkipSetup
 
       - name: Repackage into portable bundle
         shell: pwsh
