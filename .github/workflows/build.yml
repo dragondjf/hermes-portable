@@ -117,15 +117,13 @@ jobs:
           # Pin to a real hermes-agent source ref when given; otherwise install latest main.
           # NOTE: download the installer to a file and invoke it with `&` — `iex (irm ...) -Arg`
           # passes -Arg to iex (which has no such param) and fails.
-          # Download the installer, turn it into a scriptblock, and invoke it with
-          # `&` so named params (-HermesHome) reach the script (not iex). Build args
-          # as an array to avoid PowerShell nested-quote/ParserError pitfalls.
-          $installScript = irm https://hermes-agent.nousresearch.com/install.ps1
-          $sb = [scriptblock]::Create($installScript)
-          $ref = "${{ github.event.inputs.hermes_ref }}"
-          $args = @('-HermesHome', $env:HERMES_HOME, '-SkipSetup')
-          if ($ref) { $args += '-Commit', $ref }
-          & $sb @args
+          # Official installer reads HERMES_HOME from the env (workflow sets it),
+          # so we only pass the -SkipSetup switch. Download to a file and invoke
+          # with `&` — avoids iex param-binding and [scriptblock]::Create
+          # encoding pitfalls. -Encoding utf8 keeps the file parseable on Windows.
+          $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
+          irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1 -Encoding utf8
+          & $installPs1 -SkipSetup
 
       - name: Repackage into portable bundle
         shell: pwsh
