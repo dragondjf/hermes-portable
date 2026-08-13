@@ -29,9 +29,12 @@ if [ ! -d "$VENV" ]; then
   exit 1
 fi
 
-# 1) capture the official dependency set (pinned versions) from the real venv
+# 1) capture the official dependency set (pinned versions) from the real venv.
+#    Use `uv pip freeze` (not $VENV/bin/pip) because uv-built venvs may lack a
+#    standalone pip executable. uv is on PATH (setup-uv in CI).
 REQ_TXT="$(mktemp)"
-"$VENV/bin/pip" freeze --exclude-editable > "$REQ_TXT"
+uv pip freeze --python "$VENV/bin/python" --exclude-editable > "$REQ_TXT" 2>/dev/null \
+  || "$VENV/bin/python" -m pip freeze --exclude-editable > "$REQ_TXT"
 echo "==> captured $(wc -l < "$REQ_TXT") pinned deps from official venv"
 
 # 2) bundle a standalone CPython via uv (so the package needs no external interpreter)

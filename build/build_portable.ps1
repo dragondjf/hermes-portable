@@ -27,8 +27,10 @@ if (-not (Test-Path $VENV)) {
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Error "uv not found"; exit 1 }
 
 # 1) capture the official dependency set (pinned versions)
+#    Use `uv pip freeze` (not $VENV\Scripts\pip.exe) because uv-built venvs may
+#    lack a standalone pip executable. uv is on PATH (setup-uv in CI).
 $req = Join-Path $env:TEMP "hermes-reqs.txt"
-& "$VENV\Scripts\pip.exe" freeze --exclude-editable | Out-File -Encoding utf8 $req
+uv pip freeze --python "$VENV\Scripts\python.exe" --exclude-editable | Out-File -Encoding utf8 $req
 Write-Host "==> captured deps from official venv"
 
 # 2) bundle a standalone CPython via uv
