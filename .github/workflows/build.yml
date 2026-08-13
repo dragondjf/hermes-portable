@@ -6,12 +6,12 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      commit:
-        description: 'hermes-agent git commit/branch/tag to package. Empty = main (latest).'
+      hermes_ref:
+        description: 'hermes-agent SOURCE ref to package: a commit SHA or date-based tag (e.g. v2026.8.3). Leave EMPTY to install latest main. NOTE: this is NOT the packaging version number.'
         required: false
         default: ''
       version_label:
-        description: 'Human label for the release asset (e.g. 0.20.0). Empty = derived from tag/commit.'
+        description: 'Human label for the release asset (e.g. 0.20.0). Empty = derived from tag.'
         required: false
         default: ''
 
@@ -49,28 +49,20 @@ jobs:
         with:
           version: '0.11.28'
 
-      - name: Resolve target commit/branch
-        id: tgt
-        shell: bash
-        run: |
-          C="${{ github.event.inputs.commit }}"
-          if [ -z "$C" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
-            C="${GITHUB_REF_NAME#v}"   # try tag name as version/commit hint
-          fi
-          echo "commit=${C:-main}" >> "$GITHUB_OUTPUT"
-          L="${{ github.event.inputs.version_label }}"
-          if [ -z "$L" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
-            L="${GITHUB_REF_NAME#v}"
-          fi
-          echo "label=${L:-ci}" >> "$GITHUB_OUTPUT"
-
       - name: Official install (curl install.sh)
         shell: bash
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
+          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          # NOTE: hermes-agent source uses date-based tags (e.g. v2026.8.3) and commit SHAs,
+          # NOT semantic versions like 0.20.0 — so we never pass the packaging tag name as --commit.
+          COMMIT_ARG=""
+          if [ -n "${{ github.event.inputs.hermes_ref }}" ]; then
+            COMMIT_ARG="--commit ${{ github.event.inputs.hermes_ref }}"
+          fi
           curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-            | bash -s -- --hermes-home "$HERMES_HOME" --commit "${{ steps.tgt.outputs.commit }}" --skip-setup --skip-browser
+            | bash -s -- --hermes-home "$HERMES_HOME" $COMMIT_ARG --skip-setup --skip-browser
 
       - name: Repackage into portable bundle
         shell: bash
@@ -117,23 +109,17 @@ jobs:
         with:
           version: '0.11.28'
 
-      - name: Resolve target commit/branch
-        id: tgt
-        shell: pwsh
-        run: |
-          $C = "${{ github.event.inputs.commit }}"
-          if (-not $C -and "$env:GITHUB_REF_NAME" -match '^v') { $C = "$env:GITHUB_REF_NAME" -replace '^v','' }
-          echo "commit=$($C -or 'main')" >> $env:GITHUB_OUTPUT
-          $L = "${{ github.event.inputs.version_label }}"
-          if (-not $L -and "$env:GITHUB_REF_NAME" -match '^v') { $L = "$env:GITHUB_REF_NAME" -replace '^v','' }
-          echo "label=$($L -or 'ci')" >> $env:GITHUB_OUTPUT
-
       - name: Official install (iex install.ps1)
         shell: pwsh
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
-          iex (irm https://hermes-agent.nousresearch.com/install.ps1) -Branch main -Commit "${{ steps.tgt.outputs.commit }}" -HermesHome "$env:HERMES_HOME" -SkipSetup
+          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          $commitArg = ""
+          if ("${{ github.event.inputs.hermes_ref }}") {
+            $commitArg = "-Commit ""${{ github.event.inputs.hermes_ref }}"""
+          }
+          iex (irm https://hermes-agent.nousresearch.com/install.ps1) -HermesHome "$env:HERMES_HOME" $commitArg -SkipSetup
 
       - name: Repackage into portable bundle
         shell: pwsh
