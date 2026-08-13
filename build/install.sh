@@ -51,12 +51,17 @@ PY="$(command -v python3 || command -v python)"
 OLD="$("$PY" - "$SP" <<'PY'
 import sys, glob, re, os
 sp = sys.argv[1]
-pat = re.compile(r'(/[A-Za-z0-9_./-]+)/hermes-agent')
+# editable metadata points at the source dir; match the FULL ".../hermes-agent" path
+pat = re.compile(r'(/[A-Za-z0-9_./-]*/hermes-agent)(?=/|\"|\x27|\b)')
+old_path = None
 for f in glob.glob(os.path.join(sp, "__editable__*.py")) + glob.glob(os.path.join(sp, "__editable__*.pth")):
     t = open(f, encoding="utf-8", errors="ignore").read()
     m = pat.search(t)
     if m:
-        print(m.group(1)); break
+        old_path = m.group(1)
+        break
+if old_path:
+    print(old_path)
 PY
 )"
 if [ -n "$OLD" ] && [ "$OLD" != "$DIR/hermes-agent" ]; then
