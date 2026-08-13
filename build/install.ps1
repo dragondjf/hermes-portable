@@ -53,7 +53,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $rewritePy) | Out-Null
 @'
 import os, glob, re, sys
 DIR, SP = sys.argv[1], sys.argv[2]
-target = os.path.join(DIR, "hermes-agent").replace("/", "\\")
+target = os.path.join(DIR, "hermes-agent").replace("\\", "/")
 changed = []
 for pat in (os.path.join(SP, "__editable__*.py"),
             os.path.join(SP, "hermes_agent-*.dist-info", "direct_url.json")):
@@ -62,7 +62,7 @@ for pat in (os.path.join(SP, "__editable__*.py"),
         m = re.search(r"[A-Za-z]:[\\/].+?[\\/]hermes-agent", t)
         if not m:
             continue
-        old = m.group(0).replace("/", "\\")
+        old = m.group(0).replace("\\", "/")
         if old == target:
             continue
         open(f, "w", encoding="utf-8").write(t.replace(old, target))
