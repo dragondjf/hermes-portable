@@ -52,7 +52,7 @@ OLD="$("$PY" - "$SP" <<'PY'
 import sys, glob, re, os
 sp = sys.argv[1]
 pat = re.compile(r'(/[A-Za-z0-9_./-]+)/hermes-agent')
-for f in glob.glob(os.path.join(sp, "__editable__*.py")):
+for f in glob.glob(os.path.join(sp, "__editable__*.py")) + glob.glob(os.path.join(sp, "__editable__*.pth")):
     t = open(f, encoding="utf-8", errors="ignore").read()
     m = pat.search(t)
     if m:
@@ -64,6 +64,7 @@ if [ -n "$OLD" ] && [ "$OLD" != "$DIR/hermes-agent" ]; then
 import sys, glob, os
 old, new, sp = sys.argv[1], sys.argv[2], sys.argv[3]
 for f in glob.glob(os.path.join(sp, "__editable__*.py")) + \
+         glob.glob(os.path.join(sp, "__editable__*.pth")) + \
          glob.glob(os.path.join(sp, "hermes_agent-*.dist-info", "direct_url.json")):
     if not os.path.isfile(f):
         continue

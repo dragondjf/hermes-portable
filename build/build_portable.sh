@@ -64,7 +64,8 @@ rsync -a --exclude='.git' --exclude='tests' --exclude='tests-js' \
   "$SRC/" "$OUT/hermes-agent/"
 
 # 7) re-establish editable install of hermes-agent inside the bundle
-"$OUT/hermes-agent/venv/bin/pip" install --no-build-isolation --no-cache-dir \
+#    Use `uv pip install -e` (not venv/bin/pip — uv-built venvs lack a pip exe).
+uv pip install --python "$OUT/hermes-agent/venv/bin/python" --no-build-isolation --no-cache-dir \
   -e "$OUT/hermes-agent/"
 
 # 8) placeholder pyvenv.cfg home; install.sh rewrites at deploy (python for cross-platform sed)
