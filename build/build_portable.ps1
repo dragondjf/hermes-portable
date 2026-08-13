@@ -36,7 +36,9 @@ Write-Host "==> captured deps from official venv"
 # 2) bundle a standalone CPython via uv
 uv python install 3.11 | Out-Null
 $pyBin = (uv python find 3.11 --no-project).Trim()
-$pyPrefix = (Split-Path (Split-Path $pyBin))
+# $pyBin is .../cpython-3.11.15-windows-x86_64-none/python3.11.exe; the runtime
+# dir we bundle is its parent (one level up), which holds python3.11.exe.
+$pyPrefix = Split-Path $pyBin
 Write-Host "==> bundling python from $pyPrefix"
 
 Remove-Item -Recurse -Force $Out -ErrorAction SilentlyContinue
