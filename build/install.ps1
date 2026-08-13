@@ -61,15 +61,18 @@ for pat in (os.path.join(SP, "__editable__*.py"),
     for f in glob.glob(pat):
         t = open(f, encoding="utf-8").read()
         # Normalize to forward slashes so backslash build paths (D:\a\...) match
-        # the forward-slash search/replace consistently on Windows.
+        # consistently on Windows.
         t_norm = t.replace("\\", "/")
         m = re.search(r"[A-Za-z]:/.+?/hermes-agent", t_norm)
         if not m:
             continue
-        old = m.group(0)
-        if old == target:
+        # Replace the WHOLE build root (everything up to and including
+        # /hermes-agent), not just the matched substring, so MAPPING,
+        # NAMESPACES, and direct_url entries all relocate.
+        old_root = m.group(0)
+        if old_root == target:
             continue
-        open(f, "w", encoding="utf-8").write(t_norm.replace(old, target))
+        open(f, "w", encoding="utf-8").write(t_norm.replace(old_root, target))
         changed.append(f)
 if changed:
     print("    [ok] editable metadata path -> " + target)

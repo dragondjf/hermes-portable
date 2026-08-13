@@ -50,12 +50,17 @@ Write-Host "==> assert no build-machine absolute path leaked (relocation safety)
 # and compiled .pyc (regenerated at runtime) legitimately embed paths and must be
 # ignored. Scan the genuine sources: pyvenv.cfg, editable finder, direct_url.json,
 # .pth — using forward-slash + case-insensitive matching (mirrors install.ps1).
-$BAD = Get-ChildItem -Recurse -Force $PKG -File |
+$BAD = @()
+Get-ChildItem -Recurse -Force $PKG -File |
   Where-Object { $_.Name -match 'pyvenv\.cfg|__editable__.*\.py$|direct_url\.json|__editable__.*\.pth$' -and $_.Extension -ne '.exe' -and $_.DirectoryName -notmatch '__pycache__' } |
   ForEach-Object {
     $c = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
     $c = $c -replace '\\', '/'
-    if ($c -match '/home/runner|/Users/runneradmin|C:/Users/runneradmin|D:/a/hermes-portable|/root/') { $_.FullName }
+    if ($c -match '/home/runner|/Users/runneradmin|C:/Users/runneradmin|D:/a/hermes-portable|/root/') {
+      $BAD += $_.FullName
+      Write-Host "    [leak-debug] $($_.FullName)"
+      ($c -split "`n" | Where-Object { $_ -match 'D:/a|/home/runner|/Users/runneradmin|/root/' }) | ForEach-Object { Write-Host "        $_" }
+    }
   }
 if ($BAD) { Write-Error "FAIL: build-machine path leaked in:`n$BAD"; exit 1 }
 
