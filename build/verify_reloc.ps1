@@ -46,11 +46,17 @@ if ($OUT -match 'Install directory:.*D:\\a\\hermes-portable') {
 }
 
 Write-Host "==> assert no build-machine absolute path leaked (relocation safety)"
-# Scan pyvenv.cfg + editable metadata + direct_url for ANY build-machine path.
+# Only text metadata files can break relocation. venv console-script .exe launchers
+# and compiled .pyc (regenerated at runtime) legitimately embed paths and must be
+# ignored. Scan the genuine sources: pyvenv.cfg, editable finder, direct_url.json,
+# .pth — using forward-slash + case-insensitive matching (mirrors install.ps1).
 $BAD = Get-ChildItem -Recurse -Force $PKG -File |
-  Where-Object { $_.Name -match 'pyvenv\.cfg|__editable__|direct_url\.json|.*\.pth$' } |
-  ForEach-Object { $c = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
-    if ($c -match '/home/runner|/Users/runneradmin|C:\\Users\\runneradmin|D:\\a\\hermes-portable|/root/') { $_.FullName } }
+  Where-Object { $_.Name -match 'pyvenv\.cfg|__editable__.*\.py$|direct_url\.json|__editable__.*\.pth$' -and $_.Extension -ne '.exe' -and $_.DirectoryName -notmatch '__pycache__' } |
+  ForEach-Object {
+    $c = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
+    $c = $c -replace '\\', '/'
+    if ($c -match '/home/runner|/Users/runneradmin|C:/Users/runneradmin|D:/a/hermes-portable|/root/') { $_.FullName }
+  }
 if ($BAD) { Write-Error "FAIL: build-machine path leaked in:`n$BAD"; exit 1 }
 
 Write-Host "==> functional offline test (kanban SQLite persists)"
