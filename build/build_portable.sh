@@ -4,7 +4,7 @@
 # Strategy (faithful to the official installer):
 #   1. The official installer has already installed Hermes into $HERMES_HOME
 #      (default ~/.hermes): it git-clones the source and `uv pip install -e '.[all]'`
-#      into $HERMES_HOME/hermes-agent/venv. That venv's python is a symlink into
+#      into $HERMES_HOME/venv (NOT $HERMES_HOME/hermes-agent/venv). That venv's python is a symlink into
 #      uv's shared directory, so it is NOT relocatable on its own.
 #   2. We capture the official venv's full dependency set (pip freeze --exclude-editable),
 #      build a --copies venv with a bundled CPython (via uv), reinstall the same
@@ -19,7 +19,7 @@ set -euo pipefail
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 OUT="${OUT:-$PWD/hermes-portable}"
 SRC="$HERMES_HOME/hermes-agent"
-VENV="$SRC/venv"
+VENV="$HERMES_HOME/venv"
 
 echo "==> building hermes-portable from official install at $HERMES_HOME"
 

@@ -2,7 +2,7 @@
 # Strategy (faithful to the official installer):
 #   1. The official installer has already installed Hermes into $env:HERMES_HOME
 #      (default %LOCALAPPDATA%\hermes): it git-clones the source and
-#      `uv pip install -e '.[all]'` into $env:HERMES_HOME\hermes-agent\venv.
+#      `uv pip install -e '.[all]'` into $env:HERMES_HOME\venv (NOT hermes-agent\venv).
 #      That venv's python is a symlink into uv's shared dir, so it is NOT
 #      relocatable on its own.
 #   2. We capture the official venv's full dependency set (pip freeze
@@ -17,7 +17,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $SRC = Join-Path $HermesHome "hermes-agent"
-$VENV = Join-Path $SRC "venv"
+$VENV = Join-Path $HermesHome "venv"
 Write-Host "==> building hermes-portable from official install at $HermesHome"
 
 if (-not (Test-Path $VENV)) {
