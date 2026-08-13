@@ -11,18 +11,13 @@ SP="$VENV/lib/python3.11/site-packages"
 echo "==> Hermes portable installer (no root, no network)"
 echo "    Package dir: $DIR"
 
-PY="$VENV/bin/python"
-
 # 1) pyvenv.cfg home -> bundled runtime (fixes 'No module named encodings')
+#    IMPORTANT: do NOT use $VENV/bin/python here — pyvenv.cfg still holds the
+#    __HERMES_RUNTIME_BIN__ placeholder, so that interpreter cannot start.
+#    Use sed -i.bak (works on both GNU and BSD/macOS sed).
 if [ -f "$PYVCFG" ] && grep -q '__HERMES_RUNTIME_BIN__' "$PYVCFG"; then
-  "$PY" - "$PYVCFG" "$RT_BIN" <<'PY'
-import sys, re
-p, rt = sys.argv[1], sys.argv[2]
-s = open(p, encoding="utf-8").read()
-s = re.sub(r'^home = .*', 'home = ' + rt, s, flags=re.M)
-s = re.sub(r'^uv = .*\n', '', s, flags=re.M)
-open(p, "w", encoding="utf-8").write(s)
-PY
+  sed -i.bak "s#__HERMES_RUNTIME_BIN__#$RT_BIN#" "$PYVCFG"
+  rm -f "$PYVCFG.bak"
   echo "    [ok] pyvenv.cfg home -> $RT_BIN"
 else
   echo "    [skip] pyvenv.cfg already configured"
@@ -50,13 +45,14 @@ telemetry:
 YAML
 echo "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path (cross-platform, Python not sed)
+# 4) rewrite editable metadata absolute path -> deploy path
+#    Use system python3 (venv python is now fixed but system python is safer).
+PY="$(command -v python3 || command -v python)"
 OLD="$("$PY" - "$SP" <<'PY'
 import sys, glob, re, os
 sp = sys.argv[1]
-hits = glob.glob(os.path.join(sp, "__editable__*.py"))
 pat = re.compile(r'(/[A-Za-z0-9_./-]+)/hermes-agent')
-for f in hits:
+for f in glob.glob(os.path.join(sp, "__editable__*.py")):
     t = open(f, encoding="utf-8", errors="ignore").read()
     m = pat.search(t)
     if m:
