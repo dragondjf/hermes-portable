@@ -17,7 +17,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $SRC = Join-Path $HermesHome "hermes-agent"
-$VENV = Join-Path $HermesHome "venv"
+$VENV = Join-Path $SRC "venv"
 Write-Host "==> building hermes-portable from official install at $HermesHome"
 
 if (-not (Test-Path $VENV)) {

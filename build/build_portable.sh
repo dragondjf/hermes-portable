@@ -19,7 +19,7 @@ set -euo pipefail
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 OUT="${OUT:-$PWD/hermes-portable}"
 SRC="$HERMES_HOME/hermes-agent"
-VENV="$HERMES_HOME/venv"
+VENV="$HERMES_HOME/hermes-agent/venv"
 
 echo "==> building hermes-portable from official install at $HERMES_HOME"
 
