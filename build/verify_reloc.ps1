@@ -15,8 +15,14 @@ Write-Host "==> relocatability test: deploy to a different path"
 $RELOC = Join-Path $env:TEMP "hermes-reloc-test"
 Remove-Item -Recurse -Force $RELOC -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $RELOC | Out-Null
-Copy-Item -Recurse -Force "$PackageDir\*" (Join-Path $RELOC "hermes-portable")
+# Copy the package contents into $RELOC\hermes-portable. Remove any pre-existing
+# target first so Copy-Item doesn't hit "Container cannot be copied onto existing
+# leaf item".
 $PKG = Join-Path $RELOC "hermes-portable"
+Remove-Item -Recurse -Force $PKG -ErrorAction SilentlyContinue
+Copy-Item -Recurse -Force "$PackageDir" $PKG
+# Resolve to a canonical absolute path (handles mixed separators from the caller).
+$PKG = (Resolve-Path $PKG).Path
 
 & "$PKG\install.ps1"
 
@@ -31,7 +37,10 @@ $env:PATH = "$(Join-Path $PKG 'hermes-agent\venv\Scripts');$env:SystemRoot\Syste
 Write-Host "==> version (must show deploy Install directory, not the build path)"
 $OUT = & "$PKG\hermes.ps1" version 2>&1 | Out-String
 Write-Host $OUT
-if ($OUT -notmatch [regex]::Escape("Install directory: $PKG\hermes-agent")) {
+# Compare separator-agnostically: turn both the expected and actual paths' slashes
+# into a common form before matching.
+$expectDir = ($PKG -replace '\\', '/') + "/hermes-agent"
+if (($OUT -replace '\\', '/') -notmatch [regex]::Escape("Install directory: $expectDir")) {
   Write-Error "FAIL: Install directory not the deploy path"; exit 1
 }
 if ($OUT -notmatch 'Hermes Agent v') { Write-Error "FAIL: version not printed"; exit 1 }

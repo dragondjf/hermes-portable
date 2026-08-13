@@ -11,6 +11,8 @@ set -euo pipefail
 
 PKG="${1:-$PWD/hermes-portable}"
 [ -d "$PKG" ] || { echo "ERROR: package dir not found: $PKG"; exit 1; }
+# Normalize: macOS symlinks /tmp -> /private/tmp, so compare against the real path.
+PKG="$(cd "$PKG" && pwd -P)"
 
 echo "==> relocatability test: deploy to a different path and run with wiped env"
 RELOC=/tmp/hermes-reloc-test
