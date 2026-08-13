@@ -11,9 +11,18 @@ SP="$VENV/lib/python3.11/site-packages"
 echo "==> Hermes portable installer (no root, no network)"
 echo "    Package dir: $DIR"
 
+PY="$VENV/bin/python"
+
 # 1) pyvenv.cfg home -> bundled runtime (fixes 'No module named encodings')
 if [ -f "$PYVCFG" ] && grep -q '__HERMES_RUNTIME_BIN__' "$PYVCFG"; then
-  sed -i "s#__HERMES_RUNTIME_BIN__#$RT_BIN#" "$PYVCFG"
+  "$PY" - "$PYVCFG" "$RT_BIN" <<'PY'
+import sys, re
+p, rt = sys.argv[1], sys.argv[2]
+s = open(p, encoding="utf-8").read()
+s = re.sub(r'^home = .*', 'home = ' + rt, s, flags=re.M)
+s = re.sub(r'^uv = .*\n', '', s, flags=re.M)
+open(p, "w", encoding="utf-8").write(s)
+PY
   echo "    [ok] pyvenv.cfg home -> $RT_BIN"
 else
   echo "    [skip] pyvenv.cfg already configured"
@@ -41,13 +50,31 @@ telemetry:
 YAML
 echo "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path
-OLD="$(grep -rhoE '/[a-zA-Z0-9_./-]*/hermes-agent' "$SP/__editable__"*.py 2>/dev/null | head -1 || true)"
+# 4) rewrite editable metadata absolute path -> deploy path (cross-platform, Python not sed)
+OLD="$("$PY" - "$SP" <<'PY'
+import sys, glob, re, os
+sp = sys.argv[1]
+hits = glob.glob(os.path.join(sp, "__editable__*.py"))
+pat = re.compile(r'(/[A-Za-z0-9_./-]+)/hermes-agent')
+for f in hits:
+    t = open(f, encoding="utf-8", errors="ignore").read()
+    m = pat.search(t)
+    if m:
+        print(m.group(1)); break
+PY
+)"
 if [ -n "$OLD" ] && [ "$OLD" != "$DIR/hermes-agent" ]; then
-  for f in "$SP"/__editable__*.py "$SP"/hermes_agent-*.dist-info/direct_url.json; do
-    [ -f "$f" ] || continue
-    sed -i "s#$OLD#$DIR/hermes-agent#g" "$f"
-  done
+  "$PY" - "$OLD" "$DIR/hermes-agent" "$SP" <<'PY'
+import sys, glob, os
+old, new, sp = sys.argv[1], sys.argv[2], sys.argv[3]
+for f in glob.glob(os.path.join(sp, "__editable__*.py")) + \
+         glob.glob(os.path.join(sp, "hermes_agent-*.dist-info", "direct_url.json")):
+    if not os.path.isfile(f):
+        continue
+    s = open(f, encoding="utf-8", errors="ignore").read()
+    if old in s:
+        open(f, "w", encoding="utf-8").write(s.replace(old, new))
+PY
   echo "    [ok] editable metadata path -> $DIR/hermes-agent"
 else
   echo "    [skip] editable metadata already correct"

@@ -115,11 +115,15 @@ jobs:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
           # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          # NOTE: download the installer to a file and invoke it with `&` — `iex (irm ...) -Arg`
+          # passes -Arg to iex (which has no such param) and fails.
           $commitArg = ""
           if ("${{ github.event.inputs.hermes_ref }}") {
-            $commitArg = "-Commit ""${{ github.event.inputs.hermes_ref }}"""
+            $commitArg = "-Commit ""${{ github.event.inputs.hermes_ref }}""
           }
-          iex (irm https://hermes-agent.nousresearch.com/install.ps1) -HermesHome "$env:HERMES_HOME" $commitArg -SkipSetup
+          $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
+          irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1
+          & $installPs1 -HermesHome "$env:HERMES_HOME" $commitArg -SkipSetup
 
       - name: Repackage into portable bundle
         shell: pwsh
