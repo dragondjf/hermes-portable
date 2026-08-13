@@ -83,7 +83,10 @@ $out | sc $pyv
 '' | sc "$Out\home\config.yaml"
 
 # 10) launcher + installer from repo build/ templates
-$scriptDir = Split-Path $MyInvocation.MyCommand.Path
+#     Use $PSScriptRoot (canonical script dir) — $MyInvocation.MyCommand.Path
+#     is unreliable when the script is invoked as `pwsh build/foo.ps1` on CI.
+$scriptDir = $PSScriptRoot
+if (-not $scriptDir) { $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent }
 Copy-Item "$scriptDir\install.ps1" "$Out\install.ps1"
 Copy-Item "$scriptDir\hermes.ps1"  "$Out\hermes.ps1"
 
