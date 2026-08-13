@@ -83,10 +83,9 @@ $out | sc $pyv
 '' | sc "$Out\home\config.yaml"
 
 # 10) launcher + installer from repo build/ templates
-#     Prefer $env:SCRIPT_DIR (set by CI to the build/ dir); fall back to
-#     $PSScriptRoot, then $MyInvocation.MyCommand.Path — the latter two are
-#     unreliable when the script is piped/stdin-invoked on CI.
-$scriptDir = if ($env:SCRIPT_DIR) { $env:SCRIPT_DIR } elseif ($PSScriptRoot) { $PSScriptRoot } else { Split-Path $MyInvocation.MyCommand.Path -Parent }
+#     Use $env:GITHUB_WORKSPACE (auto-injected by Actions) — never rely on
+#     $MyInvocation/$PSScriptRoot which mis-resolve under CI pwsh invocation.
+$scriptDir = Join-Path $env:GITHUB_WORKSPACE 'build'
 Copy-Item "$scriptDir\install.ps1" "$Out\install.ps1"
 Copy-Item "$scriptDir\hermes.ps1"  "$Out\hermes.ps1"
 
