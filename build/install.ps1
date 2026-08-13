@@ -56,16 +56,20 @@ DIR, SP = sys.argv[1], sys.argv[2]
 target = os.path.join(DIR, "hermes-agent").replace("\\", "/")
 changed = []
 for pat in (os.path.join(SP, "__editable__*.py"),
+            os.path.join(SP, "__editable__*.pth"),
             os.path.join(SP, "hermes_agent-*.dist-info", "direct_url.json")):
     for f in glob.glob(pat):
         t = open(f, encoding="utf-8").read()
-        m = re.search(r"[A-Za-z]:[\\/].+?[\\/]hermes-agent", t)
+        # Normalize to forward slashes so backslash build paths (D:\a\...) match
+        # the forward-slash search/replace consistently on Windows.
+        t_norm = t.replace("\\", "/")
+        m = re.search(r"[A-Za-z]:/.+?/hermes-agent", t_norm)
         if not m:
             continue
-        old = m.group(0).replace("\\", "/")
+        old = m.group(0)
         if old == target:
             continue
-        open(f, "w", encoding="utf-8").write(t.replace(old, target))
+        open(f, "w", encoding="utf-8").write(t_norm.replace(old, target))
         changed.append(f)
 if changed:
     print("    [ok] editable metadata path -> " + target)
