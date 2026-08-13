@@ -48,7 +48,9 @@ Write-Host "    [ok] offline config.yaml written"
 #    The editable finder records the hermes-agent source dir; on relocation it must
 #    point at the deployed copy. Use Python so deep paths (D:\a\...\hermes-agent) and
 #    both MAPPING/NAMESPACES entries are rewritten, and bytes are preserved.
-& "$VENV\Scripts\python.exe" - "$DIR" "$SP" <<'PY'
+$rewritePy = Join-Path $DIR "home\bin\_rewrite_editable.py"
+New-Item -ItemType Directory -Force -Path (Split-Path $rewritePy) | Out-Null
+@'
 import os, glob, re, sys
 DIR, SP = sys.argv[1], sys.argv[2]
 target = os.path.join(DIR, "hermes-agent").replace("/", "\\")
@@ -69,7 +71,9 @@ if changed:
     print("    [ok] editable metadata path -> " + target)
 else:
     print("    [skip] editable metadata already correct")
-PY
+'@ | Set-Content -NoNewline $rewritePy
+& "$VENV\Scripts\python.exe" $rewritePy "$DIR" "$SP"
+Remove-Item -Force $rewritePy -ErrorAction SilentlyContinue
 
 # 5) clear stale pyc
 Get-ChildItem -Recurse -Force -Path $DIR -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
