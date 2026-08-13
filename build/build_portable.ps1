@@ -47,6 +47,12 @@ $pyDest = "$Out\runtime\python"
 if (Test-Path $pyDest) { Remove-Item -Recurse -Force $pyDest }
 New-Item -ItemType Directory -Force -Path $pyDest | Out-Null
 Copy-Item -Recurse -Force "$pyPrefix\*" $pyDest
+# uv installs the interpreter as python3.11.exe (no plain python.exe); venv needs
+# python.exe, so create a copy/alias of the real binary.
+$realPy = Get-ChildItem "$pyDest\python3*.exe" | Select-Object -First 1
+if ($realPy -and -not (Test-Path "$pyDest\python.exe")) {
+  Copy-Item $realPy.FullName "$pyDest\python.exe"
+}
 
 # 4) copies venv => interpreter is a real file, not a symlink out
 & "$Out\runtime\python\python.exe" -m venv --copies "$Out\hermes-agent\venv"
