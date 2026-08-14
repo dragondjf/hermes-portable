@@ -74,7 +74,12 @@ jobs:
       - name: Smoke test (install + version, offline)
         shell: bash
         run: |
-          cd hermes-portable
+          # Run on a COPY so the built artifact stays tokenized (zero absolute
+          # paths). install.sh de-tokenizes the package it runs on; running it
+          # in-place would leak the build path into the published tarball and
+          # break the relocatability check below.
+          rm -rf smoke-test && cp -a hermes-portable smoke-test
+          cd smoke-test
           bash install.sh
           bash hermes.sh version
 
@@ -144,7 +149,12 @@ jobs:
       - name: Smoke test (install + version, offline)
         shell: pwsh
         run: |
-          cd hermes-portable
+          # Run on a COPY so the built artifact stays tokenized. install.ps1
+          # de-tokenizes the package it runs on; in-place would leak the build
+          # path into the published zip and break the relocatability check.
+          Remove-Item smoke-test -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force hermes-portable smoke-test
+          cd smoke-test
           pwsh install.ps1
           pwsh hermes.ps1 version
 
