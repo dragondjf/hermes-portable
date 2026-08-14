@@ -105,8 +105,30 @@ def main():
 
     if mode == "build":
         print("    [build] tokenized editable metadata (%d files)" % len(changed))
-    else:
-        print("    [install] relocated editable metadata -> %s (%d files)" % (pkg, len(changed)))
+        return
+
+    # install mode: verify the rewrite actually removed every absolute path that
+    # is NOT the deploy root. A leftover token or a stray build path is a real
+    # relocation failure (fail hard). We compare against the actual deploy dir,
+    # so running in-place on CI (deploy == build workspace) does NOT false-fail.
+    deploy_n = pkg.replace("\\", "/")
+    bad = []
+    for f in files:
+        c = open(f, encoding="utf-8").read().replace("\\", "/")
+        if TOKEN in c:
+            bad.append((f, "leftover token"))
+            continue
+        # every absolute path must be under the deploy root
+        for m in re.findall(r'(?:/home/|/Users/|/root/|[A-Za-z]:/)[^"\'\s\\]*', c):
+            if not m.startswith(deploy_n):
+                bad.append((f, m))
+                break
+    if bad:
+        for f, why in bad:
+            print("    [FAIL] %s : %s" % (f, why), file=sys.stderr)
+        print("FAIL: editable metadata still has non-deploy absolute path", file=sys.stderr)
+        sys.exit(1)
+    print("    [install] relocated editable metadata -> %s (%d files) + verified" % (pkg, len(changed)))
 
 
 if __name__ == "__main__":

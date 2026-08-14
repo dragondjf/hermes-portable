@@ -55,12 +55,9 @@ echo "    [ok] offline config.yaml written"
 #    Uses the same _rewrite_paths.py as Windows for identical, testable behavior.
 RW="$DIR/home/bin/_rewrite_paths.py"
 if [ -f "$RW" ]; then
+  # _rewrite_paths.py install mode also verifies (fails if a non-deploy
+  # absolute path remains). set -e aborts the installer on failure.
   "$VENV/bin/python" "$RW" install "$DIR"
-  # verify no build path remains
-  if grep -rIl -E 'D:\\\\a\\\\hermes-portable|D:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_PKG_ROOT__' "$SP" 2>/dev/null | grep -qE '__editable__|direct_url'; then
-    echo "    [FAIL] editable metadata still has build path" >&2
-    exit 1
-  fi
   echo "    [ok] editable metadata relocated + verified"
 else
   echo "    [warn] _rewrite_paths.py missing; editable metadata may keep build path"

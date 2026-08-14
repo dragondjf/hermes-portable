@@ -45,24 +45,16 @@ telemetry:
 Write-Host "    [ok] offline config.yaml written"
 
 # 4) rewrite editable metadata absolute path -> deploy path (token -> real)
-#    Uses the shared _rewrite_paths.py so behavior is identical across platforms
-#    and is testable on Linux. Fails hard if the finder still contains a build
-#    path after the rewrite (no silent "relocation broken").
+#    _rewrite_paths.py install mode also verifies (fails if a non-deploy
+#    absolute path remains). Abort the installer on failure.
 $RW = "$DIR\home\bin\_rewrite_paths.py"
 if (Test-Path $RW) {
   & "$VENV\Scripts\python.exe" $RW install "$DIR"
+  if ($LASTEXITCODE -ne 0) { Write-Error "FAIL: editable metadata relocation/verify failed"; exit 1 }
+  Write-Host "    [ok] editable metadata relocated + verified"
 } else {
   Write-Host "    [warn] _rewrite_paths.py missing; editable metadata may keep build path"
 }
-# verify
-$bad = Get-ChildItem "$SP" -File -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
-  ForEach-Object {
-    $c = gc $_.FullName -Raw
-    if ($c -match 'D:\\\\a\\\\hermes-portable|C:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_PKG_ROOT__') { $_.FullName }
-  }
-if ($bad) { Write-Error "FAIL: editable metadata still has build path in: $bad"; exit 1 }
-Write-Host "    [ok] editable metadata relocated + verified"
 
 # 5) clear stale pyc
 Get-ChildItem -Recurse -Force -Path $DIR -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
