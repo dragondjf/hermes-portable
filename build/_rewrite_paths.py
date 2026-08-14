@@ -73,25 +73,33 @@ def main():
         print("    [skip] no editable metadata files found", file=sys.stderr)
         return
 
-    # Exact roots to match (both separators). On Windows the editable finder may
-    # store forward or back slashes; on CI the path may be nested hermes-portable
-    # dirs. Exact replace of the FULL package root avoids any corruption.
+    # Exact roots to match. The editable finder (a .py SOURCE file) stores
+    # Windows paths with DOUBLED backslashes (a Python string literal: 'D:\\\\a\\..'),
+    # while direct_url.json uses forward slashes (file:///D:/a/..). os.path.abspath
+    # gives a single-backslash path, so we must try EVERY separator variant of the
+    # full package root, otherwise the Windows finder is left untouched and hermes
+    # keeps importing from the build path.
     pkg_fwd = pkg.replace("\\", "/")
+    pkg_bak = pkg.replace("/", "\\")
+    pkg_dbl = pkg.replace("\\", "\\\\")  # doubled, as stored in the .py finder
 
     changed = []
     for f in files:
         t = open(f, encoding="utf-8").read()
         orig = t
         if mode == "build":
-            t = t.replace(pkg, TOKEN)
-            t = t.replace(pkg_fwd, TOKEN)
+            for root in (pkg, pkg_fwd, pkg_bak, pkg_dbl):
+                t = t.replace(root, TOKEN)
         else:  # install
-            deploy = pkg_fwd
+            # Restore with the SAME separator the file uses, so the relocated
+            # value is consistent (forward slash on Unix, backslash on Windows).
+            sep = "\\" if "\\" in t else "/"
+            deploy = pkg_fwd.replace("/", sep).replace("\\", sep)
             t = t.replace(TOKEN, deploy)
             # safety: if the build left a literal pkg path (token missing),
             # replace it exactly (no regex) so relocation is still correct.
-            t = t.replace(pkg, deploy)
-            t = t.replace(pkg_fwd, deploy)
+            for root in (pkg, pkg_fwd, pkg_bak, pkg_dbl):
+                t = t.replace(root, deploy)
         if t != orig:
             open(f, "w", encoding="utf-8").write(t)
             changed.append(f)
