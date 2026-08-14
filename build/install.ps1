@@ -36,14 +36,23 @@ telemetry:
 '@ | sc "$DIR\home\config.yaml"
 Write-Host "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path (token -> real)
-#    _rewrite_paths.py install mode also verifies (fails if a non-deploy
-#    absolute path remains). Abort the installer on failure.
+# 4) rewrite editable metadata + pyvenv.cfg absolute path -> deploy path
+#    (token -> real). Done by the SHARED _rewrite_paths.py. CRITICAL: run it with
+#    the BUNDLED standalone runtime python ($DIR\runtime\python\python.exe), NOT
+#    the venv python. The venv python reads pyvenv.cfg to start, and pyvenv.cfg
+#    still holds the __HERMES_RUNTIME_BIN__ token until this script rewrites it —
+#    so the venv python cannot launch itself. The bundled runtime python is a
+#    standalone interpreter (no pyvenv dependency) and starts fine; _rewrite_paths
+#    fixes pyvenv.cfg first, then the editable metadata, and verifies both.
+#    (On Unix, install.sh step 1 fixes pyvenv.cfg with sed before step 4; on
+#    Windows we route the whole fix through this bundled-python call instead.)
 $RW = "$DIR\home\bin\_rewrite_paths.py"
+$RTPY = "$DIR\runtime\python\python.exe"
 if (Test-Path $RW) {
-  & "$VENV\Scripts\python.exe" $RW install "$DIR"
-  if ($LASTEXITCODE -ne 0) { Write-Error "FAIL: editable metadata relocation/verify failed"; exit 1 }
-  Write-Host "    [ok] editable metadata relocated + verified"
+  if (-not (Test-Path $RTPY)) { Write-Error "FAIL: bundled runtime python not found at $RTPY"; exit 1 }
+  & "$RTPY" $RW install "$DIR"
+  if ($LASTEXITCODE -ne 0) { Write-Error "FAIL: editable metadata/pyvenv relocation failed"; exit 1 }
+  Write-Host "    [ok] editable metadata + pyvenv.cfg relocated + verified"
 } else {
   Write-Host "    [warn] _rewrite_paths.py missing; editable metadata may keep build path"
 }
