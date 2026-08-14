@@ -85,6 +85,8 @@ $scriptDir = Join-Path $PWD.Path 'build'
 Write-Host "==> scriptDir = $scriptDir"
 Copy-Item "$scriptDir\install.ps1" "$Out\install.ps1"
 Copy-Item "$scriptDir\hermes.ps1"  "$Out\hermes.ps1"
+Copy-Item "$scriptDir\install.bat" "$Out\install.bat"
+Copy-Item "$scriptDir\hermes.bat"  "$Out\hermes.bat"
 New-Item -ItemType Directory -Force -Path "$Out\home\bin" | Out-Null
 Copy-Item "$scriptDir\_rewrite_paths.py" "$Out\home\bin\_rewrite_paths.py"
 
