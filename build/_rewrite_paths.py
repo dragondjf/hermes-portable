@@ -126,7 +126,12 @@ def main():
     # while the deploy dir has one (C:/Users/...). Stripping the drive letter on
     # both sides makes the startswith check correct on every platform.
     def _norm(p):
-        p = p.replace("\\", "/").lower()
+        # Fully normalize: undo Python's string-literal escaping (\\ -> \), then
+        # unify separators (\ -> /), then collapse any accidental // -> /. This
+        # makes a Windows doubled-backslash path ('C:\\\\Users\\..') comparable to
+        # the forward-slash deploy dir (/users/...), and avoids false mismatches
+        # from the doubled separators.
+        p = p.replace("\\\\", "\\").replace("\\", "/").replace("//", "/").lower()
         if len(p) >= 2 and p[1] == ":":
             p = p[2:]
         return p
