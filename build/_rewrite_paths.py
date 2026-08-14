@@ -91,10 +91,18 @@ def main():
             for root in (pkg, pkg_fwd, pkg_bak, pkg_dbl):
                 t = t.replace(root, TOKEN)
         else:  # install
-            # Restore with the SAME separator the file uses, so the relocated
-            # value is consistent (forward slash on Unix, backslash on Windows).
-            sep = "\\" if "\\" in t else "/"
-            deploy = pkg_fwd.replace("/", sep).replace("\\", sep)
+            # Restore with the SAME escaping the file uses, so the result is a
+            # valid Python string literal. A .py finder on Windows stores paths
+            # as DOUBLED backslashes ('C:\\\\Users\\..'); writing a single-
+            # backslash prefix ('C:\Users') would make '\U' a unicode-escape and
+            # crash on import (SyntaxError: 'unicodeescape'). So match doubling.
+            if "\\\\" in t:
+                sep = "\\\\"          # doubled backslash (Windows .py finder)
+            elif "\\" in t:
+                sep = "\\"           # single backslash
+            else:
+                sep = "/"            # forward slash (Unix)
+            deploy = pkg.replace("/", sep).replace("\\", sep)
             t = t.replace(TOKEN, deploy)
             # safety: if the build left a literal pkg path (token missing),
             # replace it exactly (no regex) so relocation is still correct.
