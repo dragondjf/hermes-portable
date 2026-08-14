@@ -104,7 +104,18 @@ def main():
     # is NOT the deploy root. A leftover token or a stray build path is a real
     # relocation failure (fail hard). We compare against the actual deploy dir,
     # so running in-place on CI (deploy == build workspace) does NOT false-fail.
-    deploy_n = pkg_fwd
+    #
+    # Normalize drive letters + separators before comparing: editable metadata on
+    # Windows may store a path WITHOUT a drive letter (e.g. /Users/runneradmin/...)
+    # while the deploy dir has one (C:/Users/...). Stripping the drive letter on
+    # both sides makes the startswith check correct on every platform.
+    def _norm(p):
+        p = p.replace("\\", "/").lower()
+        if len(p) >= 2 and p[1] == ":":
+            p = p[2:]
+        return p
+
+    deploy_n = _norm(pkg_fwd)
     bad = []
     import re
     for f in files:
@@ -116,7 +127,7 @@ def main():
         if not is_text_meta:
             continue
         for m in re.findall(r'(?:/home/|/Users/|/root/|[A-Za-z]:\\)[^\"\'\s\\]*', c):
-            if not m.startswith(deploy_n):
+            if not _norm(m).startswith(deploy_n):
                 bad.append((f, m))
                 break
     if bad:
