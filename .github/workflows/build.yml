@@ -95,6 +95,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz
+          overwrite: true
 
   # ---------------------------------------------------------------------------
   # Windows.
@@ -164,3 +165,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: hermes-portable-windows-latest-x64.zip
+          overwrite: true
