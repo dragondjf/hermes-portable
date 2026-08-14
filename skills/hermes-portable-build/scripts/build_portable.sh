@@ -1,174 +1,117 @@
 #!/usr/bin/env bash
-# Build a self-contained, offline-capable Hermes Agent portable package.
-# All artifacts live under $OUT (a user directory). No root, no system dirs,
-# no network at runtime. Python interpreter is copied (--copies) so the venv
-# no longer depends on uv's shared python directory.
+# Build a self-contained, offline Hermes Agent portable package on Linux/macOS.
+#
+# Strategy (faithful to the official installer):
+#   1. The official installer has already installed Hermes into $HERMES_HOME
+#      (default ~/.hermes): it git-clones the source and `uv pip install -e '.[all]'`
+#      into $HERMES_HOME/venv (NOT $HERMES_HOME/hermes-agent/venv). That venv's python is a symlink into
+#      uv's shared directory, so it is NOT relocatable on its own.
+#   2. We capture the official venv's full dependency set (pip freeze --exclude-editable),
+#      build a --copies venv with a bundled CPython (via uv), reinstall the same
+#      deps, copy the hermes-agent source tree, then add launcher/install/config.
+#      Result is a self-contained, relocatable, offline package.
+#
+# Env:
+#   HERMES_HOME   where the official installer placed Hermes (default ~/.hermes)
+#   OUT           output package dir (default: ./hermes-portable)
 set -euo pipefail
 
-SRC_AGENT="$HOME/.hermes/hermes-agent"
-BASE_PYTHON="$(ls -d "$HOME/.local/share/uv/python/cpython-3.11"*/ 2>/dev/null | head -1)"
-if [ -z "$BASE_PYTHON" ]; then
-  echo "ERROR: uv-managed python not found under $HOME/.local/share/uv/python/" >&2
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+OUT="${OUT:-$PWD/hermes-portable}"
+SRC="$HERMES_HOME/hermes-agent"
+VENV="$HERMES_HOME/hermes-agent/venv"
+
+echo "==> building hermes-portable from official install at $HERMES_HOME"
+
+if [ ! -d "$VENV" ]; then
+  echo "Official Hermes venv not found at $VENV — run the official installer first:" >&2
+  echo "  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" >&2
   exit 1
 fi
-BASE_PYTHON="${BASE_PYTHON%/}"
-OUT="$HOME/hermes-portable"
 
-echo "==> Source agent : $SRC_AGENT"
-echo "==> Base python  : $BASE_PYTHON"
-echo "==> Output dir   : $OUT"
+# 1) capture the official dependency set (pinned versions) from the real venv.
+#    Use `uv pip freeze` (not $VENV/bin/pip) because uv-built venvs may lack a
+#    standalone pip executable. uv is on PATH (setup-uv in CI).
+REQ_TXT="$(mktemp)"
+uv pip freeze --python "$VENV/bin/python" --exclude-editable > "$REQ_TXT" 2>/dev/null \
+  || "$VENV/bin/python" -m pip freeze --exclude-editable > "$REQ_TXT"
+echo "==> captured $(wc -l < "$REQ_TXT") pinned deps from official venv"
 
-# 1. Clean + scaffold
+# 2) bundle a standalone CPython via uv (so the package needs no external interpreter)
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv not found — install it or prepend to PATH"; exit 1
+fi
+uv python install 3.11 >/dev/null
+PY_PREFIX="$(cd "$(dirname "$(uv python find 3.11 --no-project)")/.." && pwd -P)"
+echo "==> bundling python from $PY_PREFIX"
+
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime" "$OUT/hermes-agent" "$OUT/home"
 
-# 2. Copy the full CPython runtime (stdlib + bin) so venv's symlinks resolve
-echo "==> Copying CPython runtime (self-contained) ..."
-cp -a "$BASE_PYTHON" "$OUT/runtime/python"
+# 3) copy full standalone CPython runtime (stdlib + bin)
+#    Use `cp -aL` (-L = --dereference) so any symlink in uv's python dir
+#    (e.g. the cpython-3.11-<arch> symlink, or bin/python3 -> python3.11) is
+#    expanded to a real file. Without this the package ends up holding a
+#    symlink into uv's shared dir and is NOT self-contained.
+cp -aL "$PY_PREFIX" "$OUT/runtime/python"
 
-# 3. Create a copies venv so the interpreter is a real file, not a symlink out
-echo "==> Creating --copies venv ..."
-"$OUT/runtime/python/bin/python3.11" -m venv --copies "$OUT/hermes-agent/venv"
+# 4) copies venv => interpreter is a real file, not a symlink out
+"$OUT/runtime/python/bin/python3" -m venv --copies "$OUT/hermes-agent/venv"
 
-# 4. Copy agent source tree (drop git/tests/node artifacts)
-echo "==> Copying agent source ..."
+# 5) reinstall the same pinned deps into the bundled venv
+"$OUT/hermes-agent/venv/bin/pip" install --no-cache-dir -r "$REQ_TXT"
+
+# 6) copy the hermes-agent source tree (drop git/tests/node artifacts)
 rsync -a --exclude='.git' --exclude='tests' --exclude='tests-js' \
   --exclude='node_modules' --exclude='dist' --exclude='*.egg-info' \
   --exclude='__pycache__' --exclude='.venv' --exclude='venv' \
-  "$SRC_AGENT/" "$OUT/hermes-agent/"
+  "$SRC/" "$OUT/hermes-agent/"
 
-# 5. Editable install (Hermes blocks wheel/sdist builds; editable only writes
-#    an .egg-link / __editable__ finder, no compilation, works offline).
-echo "==> Installing hermes (editable, offline) ..."
-"$OUT/hermes-agent/venv/bin/pip" install --no-build-isolation --no-cache-dir \
+# 7) re-establish editable install of hermes-agent inside the bundle
+#    Use `uv pip install -e` (not venv/bin/pip — uv-built venvs lack a pip exe).
+uv pip install --python "$OUT/hermes-agent/venv/bin/python" --no-build-isolation --no-cache-dir \
   -e "$OUT/hermes-agent/"
 
-# 6. Placeholder pyvenv.cfg home; install.sh rewrites it to the real
-#    (absolute, in-package) path at deploy time. A relative/absent home makes
-#    a copied interpreter resolve prefix against the build path and crash with
-#    "No module named 'encodings'". install.sh always knows its own dir, so it
-#    sets the correct absolute path on the target machine.
+# 8) placeholder pyvenv.cfg paths; install.sh rewrites at deploy.
+#    Placeholder BOTH `home`, `executable` AND `command` so the package is
+#    relocatable. __HERMES_RUNTIME_BIN__ is the bundled runtime dir; it is
+#    expanded by install.sh to the real (deploy-time) absolute path.
 PYVCFG="$OUT/hermes-agent/venv/pyvenv.cfg"
-if [ -f "$PYVCFG" ]; then
-  sed -i "s#^home = .*#home = __HERMES_RUNTIME_BIN__#" "$PYVCFG" || true
-  sed -i '/^uv = /d' "$PYVCFG" || true
-fi
+RT="__HERMES_RUNTIME_BIN__"
+"$OUT/runtime/python/bin/python3" - "$PYVCFG" "$RT" <<'PY'
+import sys, re
+p, rt = sys.argv[1], sys.argv[2]
+s = open(p, encoding="utf-8").read()
+s = re.sub(r'^home = .*', f'home = {rt}/bin', s, flags=re.M)
+s = re.sub(r'^executable = .*', f'executable = {rt}/bin/python3.11', s, flags=re.M)
+s = re.sub(r'^command = .*', '', s, flags=re.M)
+s = re.sub(r'^uv = .*\n', '', s, flags=re.M)
+open(p, "w", encoding="utf-8").write(s)
+PY
 
-# 7. Bundle the uv binary so managed_uv() never tries to download
+# 9) offline config placeholder (install.sh writes the real one)
+printf '# Written by install.sh\n' > "$OUT/home/config.yaml"
+
+# 10) launcher + installer + shared rewrite script from repo build/ templates
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cp "$SCRIPT_DIR/install.sh" "$OUT/install.sh"
+cp "$SCRIPT_DIR/hermes.sh"  "$OUT/hermes.sh"
 mkdir -p "$OUT/home/bin"
-if [ -x "$HOME/.hermes/bin/uv" ]; then
-  cp -a "$HOME/.hermes/bin/uv" "$OUT/home/bin/uv"
-fi
+cp "$SCRIPT_DIR/_rewrite_paths.py" "$OUT/home/bin/_rewrite_paths.py"
+chmod +x "$OUT/install.sh" "$OUT/hermes.sh"
 
-# 8. Offline config placeholder; install.sh writes the real offline config.
-mkdir -p "$OUT/home"
-cat > "$OUT/home/config.yaml" <<'EOF'
-# Written by install.sh — offline defaults.
-EOF
+# 8b) tokenize editable metadata (build mode) — removes ALL absolute paths from
+#     the published package per the green-package requirement (zero absolute
+#     paths in the artifact; install.sh relocates at deploy).
+"$OUT/runtime/python/bin/python3" "$OUT/home/bin/_rewrite_paths.py" build "$OUT"
 
-# 9. Launcher (no hardcoded absolute paths; resolves its own dir)
-cat > "$OUT/hermes.sh" <<'EOF'
-#!/usr/bin/env bash
-set -e
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export HERMES_HOME="$DIR/home"
-export PATH="$DIR/home/bin:$DIR/hermes-agent/venv/bin:$PATH"
-exec "$DIR/hermes-agent/venv/bin/python" -m hermes_cli.main "$@"
-EOF
-chmod +x "$OUT/hermes.sh"
-
-# 10. install.sh: one-shot deploy config inside the package dir.
-#     - rewrites pyvenv.cfg home to the in-package runtime (fixes encodings crash)
-#     - ensures uv binary present
-#     - writes offline config.yaml
-#     - no root, no system dirs, idempotent
-cat > "$OUT/install.sh" <<'EOF'
-#!/usr/bin/env bash
-set -e
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RT_BIN="$DIR/runtime/python/bin"
-VENV="$DIR/hermes-agent/venv"
-PYVCFG="$VENV/pyvenv.cfg"
-
-echo "==> Hermes portable installer (no root, no network)"
-echo "    Package dir: $DIR"
-
-# 1) Fix pyvenv.cfg home -> bundled runtime (absolute, in-package)
-if [ -f "$PYVCFG" ]; then
-  if grep -q '__HERMES_RUNTIME_BIN__' "$PYVCFG"; then
-    sed -i "s#__HERMES_RUNTIME_BIN__#$RT_BIN#" "$PYVCFG"
-    echo "    [ok] pyvenv.cfg home -> $RT_BIN"
-  else
-    echo "    [skip] pyvenv.cfg already configured"
-  fi
-else
-  echo "    [warn] $PYVCFG not found"
-fi
-
-# 2) Ensure uv binary present (managed_uv falling back to download is blocked)
-mkdir -p "$DIR/home/bin"
-if [ ! -x "$DIR/home/bin/uv" ]; then
-  if [ -x "$HOME/.hermes/bin/uv" ]; then
-    cp -a "$HOME/.hermes/bin/uv" "$DIR/home/bin/uv"
-    echo "    [ok] uv copied from $HOME/.hermes/bin"
-  else
-    echo "    [warn] uv binary missing; update/repair features may need network"
-  fi
-fi
-
-# 3) Write offline config (idempotent)
-cat > "$DIR/home/config.yaml" <<'YAML'
-security:
-  allow_lazy_installs: false
-update:
-  check_on_startup: false
-telemetry:
-  enabled: false
-YAML
-echo "    [ok] offline config.yaml written"
-
-# 3b) Rewrite editable-install metadata to the real (in-package) source path.
-#     The .pth/finder and direct_url.json were generated at BUILD time with the
-#     builder's absolute path; leaving them breaks `version`'s "Install directory"
-#     and any path resolution that reads direct_url.json.
-SP="$DIR/hermes-agent/venv/lib/python3.11/site-packages"
-OLD_PATH="$(grep -rhoE '/[a-zA-Z0-9_./-]*/hermes-agent' "$SP/__editable__"*.py 2>/dev/null | head -1)"
-if [ -n "$OLD_PATH" ] && [ "$OLD_PATH" != "$DIR/hermes-agent" ]; then
-  for f in "$SP"/__editable__*.py "$SP"/hermes_agent-*.dist-info/direct_url.json; do
-    [ -f "$f" ] || continue
-    sed -i "s#$OLD_PATH#$DIR/hermes-agent#g" "$f"
-  done
-  echo "    [ok] editable metadata path -> $DIR/hermes-agent"
-else
-  echo "    [skip] editable metadata already correct"
-fi
-
-# 4) Drop precompiled bytecode so co_filename resolves to THIS deploy path
-#    (stale .pyc from a different absolute path shows a wrong "Install directory")
-find "$DIR" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-find "$DIR" -name '*.pyc' -delete 2>/dev/null || true
-echo "    [ok] cleared stale .pyc caches"
-
-# 5) Sanity check
-if [ -x "$VENV/bin/python" ]; then
-  if "$VENV/bin/python" -c "import hermes_cli" 2>/dev/null; then
-    echo "    [ok] hermes_cli importable"
-  else
-    echo "    [warn] hermes_cli not importable; run with full env to debug"
-  fi
-fi
-
-echo "==> Done. Run:  bash $DIR/hermes.sh version"
-EOF
-chmod +x "$OUT/install.sh"
-
-# 11. Drop precompiled bytecode: .pyc files bake the SOURCE absolute path into
-#     co_filename, which surfaces as a stale "Install directory" in `version`.
-#     Removing them forces runtime recompile under the correct deploy path.
-echo "==> Removing precompiled .pyc caches (recompile at runtime) ..."
+# 11) drop pyc so co_filename recompiles under deploy path
 find "$OUT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$OUT" -name '*.pyc' -delete 2>/dev/null || true
 
+# 12) bundle uv binary (so managed_uv never downloads)
+mkdir -p "$OUT/home/bin"
+cp "$(command -v uv)" "$OUT/home/bin/uv" 2>/dev/null || true
+
+rm -f "$REQ_TXT"
 echo "==> Done. Package at: $OUT"
-echo "==> Deploy:  cd hermes-portable && bash install.sh"
-echo "==> Run:     bash hermes.sh version"

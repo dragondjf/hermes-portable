@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Launcher: resolves its own dir, sets HERMES_HOME + PATH, runs the agent.
 set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export HERMES_HOME="$DIR/home"

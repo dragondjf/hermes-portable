@@ -1,0 +1,178 @@
+name: build-portable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      hermes_ref:
+        description: 'hermes-agent SOURCE ref to package: a commit SHA or date-based tag (e.g. v2026.8.3). Leave EMPTY to install latest main. NOTE: this is NOT the packaging version number.'
+        required: false
+        default: ''
+      version_label:
+        description: 'Human label for the release asset (e.g. 0.20.0). Empty = derived from tag.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # needed to upload release assets
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux (x64 + arm64) and macOS — official installer + repackage.
+  # ---------------------------------------------------------------------------
+  unix:
+    name: ${{ matrix.runner }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+          - runner: macos-latest
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      HERMES_HOME: ${{ github.workspace }}/official-hermes
+    steps:
+      - name: Checkout this packaging repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 (base for uv) + uv
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.11.28'
+
+      - name: Official install (curl install.sh)
+        shell: bash
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+        run: |
+          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          # NOTE: hermes-agent source uses date-based tags (e.g. v2026.8.3) and commit SHAs,
+          # NOT semantic versions like 0.20.0 — so we never pass the packaging tag name as --commit.
+          COMMIT_ARG=""
+          if [ -n "${{ github.event.inputs.hermes_ref }}" ]; then
+            COMMIT_ARG="--commit ${{ github.event.inputs.hermes_ref }}"
+          fi
+          curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
+            | bash -s -- --hermes-home "$HERMES_HOME" $COMMIT_ARG --skip-setup --skip-browser
+
+      - name: Repackage into portable bundle
+        shell: bash
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+          OUT: ${{ github.workspace }}/hermes-portable
+        run: bash build/build_portable.sh
+
+      - name: Smoke test (install + version, offline)
+        shell: bash
+        run: |
+          # Run on a COPY so the built artifact stays tokenized (zero absolute
+          # paths). install.sh de-tokenizes the package it runs on; running it
+          # in-place would leak the build path into the published tarball and
+          # break the relocatability check below.
+          rm -rf smoke-test && cp -a hermes-portable smoke-test
+          cd smoke-test
+          bash install.sh
+          bash hermes.sh version
+
+      - name: Green-package verification (relocatable + offline + isolated)
+        shell: bash
+        run: |
+          # TRUE green check: copy out of the build dir, run with a wiped env,
+          # assert correct deploy path, no external network, no system-dir writes.
+          bash build/verify_reloc.sh "$(pwd)/hermes-portable"
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          tar czf "hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz" hermes-portable
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz
+          overwrite: true
+
+  # ---------------------------------------------------------------------------
+  # Windows.
+  # ---------------------------------------------------------------------------
+  windows:
+    name: windows-latest (x64)
+    runs-on: windows-latest
+    env:
+      HERMES_HOME: ${{ github.workspace }}\official-hermes
+    steps:
+      - name: Checkout this packaging repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 (base for uv) + uv
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.11.28'
+
+      - name: Official install (iex install.ps1)
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+        run: |
+          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          # NOTE: download the installer to a file and invoke it with `&` — `iex (irm ...) -Arg`
+          # passes -Arg to iex (which has no such param) and fails.
+          # Official installer reads HERMES_HOME from the env (workflow sets it),
+          # so we only pass the -SkipSetup switch. Download to a file and invoke
+          # with `&` — avoids iex param-binding pitfalls. (Invoke-RestMethod has
+          # no -Encoding, so we rely on its default UTF-8 output.)
+          $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
+          irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1
+          & $installPs1 -SkipSetup
+
+      - name: Repackage into portable bundle
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ env.HERMES_HOME }}
+          OUT: ${{ github.workspace }}\hermes-portable
+          SCRIPT_DIR: ${{ github.workspace }}\build
+        run: pwsh build/build_portable.ps1
+
+      - name: Smoke test (install + version, offline)
+        shell: pwsh
+        run: |
+          # Run on a COPY so the built artifact stays tokenized. install.ps1
+          # de-tokenizes the package it runs on; in-place would leak the build
+          # path into the published zip and break the relocatability check.
+          Remove-Item smoke-test -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force hermes-portable smoke-test
+          cd smoke-test
+          pwsh install.ps1
+          pwsh hermes.ps1 version
+
+      - name: Green-package verification (relocatable + offline + isolated)
+        shell: pwsh
+        run: |
+          # TRUE green check on Windows: copy to a temp path, run with a wiped
+          # env, assert correct deploy path, and that no build-machine path leaked.
+          pwsh build/verify_reloc.ps1 -PackageDir "$(Get-Location)/hermes-portable"
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path hermes-portable -DestinationPath "hermes-portable-windows-latest-x64.zip"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: hermes-portable-windows-latest-x64.zip
+          overwrite: true
