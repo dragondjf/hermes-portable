@@ -56,10 +56,14 @@ Get-ChildItem -Recurse -Force $PKG -File |
   ForEach-Object {
     $c = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
     $c = $c -replace '\\', '/'
-    if ($c -match '/home/runner|/Users/runneradmin|C:/Users/runneradmin|D:/a/hermes-portable|/root/') {
+    # Only flag ACTUAL build-workspace paths. On CI the deploy dir legitimately
+    # lives under C:/Users/runneradmin/... (Windows) or /Users/runneradmin/...
+    # (macOS) — those are NOT leaks. The genuine leak signature is the CI BUILD
+    # workspace: D:/a/hermes-portable (Windows) or /home/runner (Linux).
+    if ($c -match '/home/runner|D:/a/hermes-portable|/root/') {
       $BAD += $_.FullName
       Write-Host "    [leak-debug] $($_.FullName)"
-      ($c -split "`n" | Where-Object { $_ -match 'D:/a|/home/runner|/Users/runneradmin|/root/' }) | ForEach-Object { Write-Host "        $_" }
+      ($c -split "`n" | Where-Object { $_ -match 'D:/a|/home/runner|/root/' }) | ForEach-Object { Write-Host "        $_" }
     }
   }
 if ($BAD) { Write-Error "FAIL: build-machine path leaked in:`n$BAD"; exit 1 }
