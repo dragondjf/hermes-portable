@@ -92,11 +92,17 @@ PY
 # 9) offline config placeholder (install.sh writes the real one)
 printf '# Written by install.sh\n' > "$OUT/home/config.yaml"
 
-# 10) launcher + installer from repo build/ templates
+# 10) launcher + installer + shared rewrite script from repo build/ templates
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/install.sh" "$OUT/install.sh"
 cp "$SCRIPT_DIR/hermes.sh"  "$OUT/hermes.sh"
+cp "$SCRIPT_DIR/_rewrite_paths.py" "$OUT/home/bin/_rewrite_paths.py"
 chmod +x "$OUT/install.sh" "$OUT/hermes.sh"
+
+# 8b) tokenize editable metadata (build mode) — removes ALL absolute paths from
+#     the published package per the green-package requirement (zero absolute
+#     paths in the artifact; install.sh relocates at deploy).
+"$OUT/runtime/python/bin/python3" "$OUT/home/bin/_rewrite_paths.py" build "$OUT"
 
 # 11) drop pyc so co_filename recompiles under deploy path
 find "$OUT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true

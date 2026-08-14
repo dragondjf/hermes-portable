@@ -44,28 +44,25 @@ telemetry:
 '@ | sc "$DIR\home\config.yaml"
 Write-Host "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path
-#    The build placeholderized the hermes-agent root as __HERMES_AGENT_ROOT__ in
-#    the editable finder + direct_url.json. Substitute the deploy path here.
-#    Deterministic (token-based), so it works regardless of build path format.
-#    Fallback: if a build path leaked without being tokenized, rewrite it too.
-$agentRootDeploy = (Join-Path $DIR "hermes-agent").Replace("\", "/")
-Get-ChildItem "$SP" -File -ErrorAction SilentlyContinue |
+# 4) rewrite editable metadata absolute path -> deploy path (token -> real)
+#    Uses the shared _rewrite_paths.py so behavior is identical across platforms
+#    and is testable on Linux. Fails hard if the finder still contains a build
+#    path after the rewrite (no silent "relocation broken").
+$RW = "$DIR\home\bin\_rewrite_paths.py"
+if (Test-Path $RW) {
+  & "$VENV\Scripts\python.exe" $RW install "$DIR"
+} else {
+  Write-Host "    [warn] _rewrite_paths.py missing; editable metadata may keep build path"
+}
+# verify
+$bad = Get-ChildItem "$SP" -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
   ForEach-Object {
-    $t = gc $_.FullName -Raw
-    $orig = $t
-    if ($t -match '__HERMES_AGENT_ROOT__') {
-      $t = $t -replace '__HERMES_AGENT_ROOT__', $agentRootDeploy
-    }
-    # Fallback: a literal build path (D:\a\... or /home/runner/...) pointing at
-    # hermes-agent — normalize and swap the prefix to the deploy path.
-    $t = $t -replace '\\', '/'
-    $t = $t -replace '[A-Za-z]:/.+?/hermes-agent', $agentRootDeploy
-    $t = $t -replace '/home/runner/.+?/hermes-agent', $agentRootDeploy
-    if ($t -ne $orig) { $t | sc $_.FullName }
+    $c = gc $_.FullName -Raw
+    if ($c -match 'D:\\a\\hermes-portable|C:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_AGENT_ROOT__') { $_.FullName }
   }
-Write-Host "    [ok] editable metadata path -> $agentRootDeploy"
+if ($bad) { Write-Error "FAIL: editable metadata still has build path in: $bad"; exit 1 }
+Write-Host "    [ok] editable metadata relocated + verified"
 
 # 5) clear stale pyc
 Get-ChildItem -Recurse -Force -Path $DIR -Directory -Filter __pycache__ | Remove-Item -Recurse -Force

@@ -69,9 +69,11 @@ robocopy "$SRC" "$Out\hermes-agent" /E /XD $excl /XF *.pyc | Out-Null
 # 7) re-establish editable install of hermes-agent inside the bundle
 & "$Out\hermes-agent\venv\Scripts\pip.exe" install --no-build-isolation --no-cache-dir -e "$Out\hermes-agent"
 
-# 8) placeholder pyvenv.cfg + editable metadata build paths; install.ps1 rewrites
-#    at deploy. NOTE: PowerShell is case-INsensitive, so a local `$out` would
-#    clobber the `$Out` output-dir param. Use a distinctly-named buffer.
+# 8) placeholder pyvenv.cfg build paths; editable metadata is tokenized in step 10
+#    via the shared _rewrite_paths.py (build mode) so the published package has
+#    ZERO absolute paths. install.ps1/.sh rewrites at deploy.
+#    NOTE: PowerShell is case-INsensitive, so a local `$out` would clobber the
+#    `$Out` output-dir param. Use a distinctly-named buffer.
 $pyv = "$Out\hermes-agent\venv\pyvenv.cfg"
 $rtBin = "__HERMES_RUNTIME_BIN__"
 $lines = gc $pyv
@@ -84,31 +86,19 @@ $newLines = $lines | % {
 }
 $newLines | sc $pyv
 
-# Placeholderize the editable finder + direct_url build root so install.ps1 can
-# substitute the deploy path deterministically (no fragile build-path regex).
-# The editable finder may store paths with EITHER backslashes or forward slashes,
-# so replace both separator variants of the build hermes-agent root.
-$agentRoot = (Resolve-Path "$Out\hermes-agent").Path
-$agentRootFwd = $agentRoot.Replace("\", "/")
-Get-ChildItem "$Out\hermes-agent\venv\Lib\site-packages" -File -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
-  ForEach-Object {
-    $t = gc $_.FullName -Raw
-    $t = $t -replace [regex]::Escape($agentRoot), '__HERMES_AGENT_ROOT__'
-    $t = $t -replace [regex]::Escape($agentRootFwd), '__HERMES_AGENT_ROOT__'
-    $t | sc $_.FullName
-  }
-
-# 9) offline config placeholder
-'' | sc "$Out\home\config.yaml"
-
-# 10) launcher + installer from repo build/ templates
+# 10) launcher + installer + shared rewrite script from repo build/ templates
 #     Resolve the build/ dir relative to the repo root. $PWD is the directory
 #     pwsh was launched in (the checked-out repo root on CI) and is reliable.
 $scriptDir = Join-Path $PWD.Path 'build'
 Write-Host "==> scriptDir = $scriptDir"
 Copy-Item "$scriptDir\install.ps1" "$Out\install.ps1"
 Copy-Item "$scriptDir\hermes.ps1"  "$Out\hermes.ps1"
+New-Item -ItemType Directory -Force -Path "$Out\home\bin" | Out-Null
+Copy-Item "$scriptDir\_rewrite_paths.py" "$Out\home\bin\_rewrite_paths.py"
+
+# 8b) tokenize editable metadata (build mode) — removes ALL absolute paths from
+#     the published package per the green-package requirement.
+& "$Out\runtime\python\python.exe" "$Out\home\bin\_rewrite_paths.py" build "$Out"
 
 # 11) drop pyc
 Get-ChildItem -Recurse -Force -Path $Out -Directory -Filter __pycache__ | Remove-Item -Recurse -Force

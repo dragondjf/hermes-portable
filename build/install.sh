@@ -51,41 +51,19 @@ telemetry:
 YAML
 echo "    [ok] offline config.yaml written"
 
-# 4) rewrite editable metadata absolute path -> deploy path
-#    Use system python3 (venv python is now fixed but system python is safer).
-PY="$(command -v python3 || command -v python)"
-OLD="$("$PY" - "$SP" <<'PY'
-import sys, glob, re, os
-sp = sys.argv[1]
-# editable metadata points at the source dir; match the FULL ".../hermes-agent" path
-pat = re.compile(r'(/[A-Za-z0-9_./-]*/hermes-agent)(?=/|\"|\x27|\b)')
-old_path = None
-for f in glob.glob(os.path.join(sp, "__editable__*.py")) + glob.glob(os.path.join(sp, "__editable__*.pth")):
-    t = open(f, encoding="utf-8", errors="ignore").read()
-    m = pat.search(t)
-    if m:
-        old_path = m.group(1)
-        break
-if old_path:
-    print(old_path)
-PY
-)"
-if [ -n "$OLD" ] && [ "$OLD" != "$DIR/hermes-agent" ]; then
-  "$PY" - "$OLD" "$DIR/hermes-agent" "$SP" <<'PY'
-import sys, glob, os
-old, new, sp = sys.argv[1], sys.argv[2], sys.argv[3]
-for f in glob.glob(os.path.join(sp, "__editable__*.py")) + \
-         glob.glob(os.path.join(sp, "__editable__*.pth")) + \
-         glob.glob(os.path.join(sp, "hermes_agent-*.dist-info", "direct_url.json")):
-    if not os.path.isfile(f):
-        continue
-    s = open(f, encoding="utf-8", errors="ignore").read()
-    if old in s:
-        open(f, "w", encoding="utf-8").write(s.replace(old, new))
-PY
-  echo "    [ok] editable metadata path -> $DIR/hermes-agent"
+# 4) rewrite editable metadata absolute path -> deploy path (shared script)
+#    Uses the same _rewrite_paths.py as Windows for identical, testable behavior.
+RW="$DIR/home/bin/_rewrite_paths.py"
+if [ -f "$RW" ]; then
+  "$VENV/bin/python" "$RW" install "$DIR"
+  # verify no build path remains
+  if grep -rIl -E 'D:\\a\\hermes-portable|D:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_AGENT_ROOT__' "$SP" 2>/dev/null | grep -qE '__editable__|direct_url'; then
+    echo "    [FAIL] editable metadata still has build path" >&2
+    exit 1
+  fi
+  echo "    [ok] editable metadata relocated + verified"
 else
-  echo "    [skip] editable metadata already correct"
+  echo "    [warn] _rewrite_paths.py missing; editable metadata may keep build path"
 fi
 
 # 5) clear stale pyc (recompile under deploy path)
