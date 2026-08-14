@@ -59,7 +59,7 @@ $bad = Get-ChildItem "$SP" -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '__editable__|direct_url\.json' } |
   ForEach-Object {
     $c = gc $_.FullName -Raw
-    if ($c -match 'D:\\a\\hermes-portable|C:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_AGENT_ROOT__') { $_.FullName }
+    if ($c -match 'D:\\\\a\\\\hermes-portable|C:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_PKG_ROOT__') { $_.FullName }
   }
 if ($bad) { Write-Error "FAIL: editable metadata still has build path in: $bad"; exit 1 }
 Write-Host "    [ok] editable metadata relocated + verified"

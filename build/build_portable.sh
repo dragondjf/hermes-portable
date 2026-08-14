@@ -96,6 +96,7 @@ printf '# Written by install.sh\n' > "$OUT/home/config.yaml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/install.sh" "$OUT/install.sh"
 cp "$SCRIPT_DIR/hermes.sh"  "$OUT/hermes.sh"
+mkdir -p "$OUT/home/bin"
 cp "$SCRIPT_DIR/_rewrite_paths.py" "$OUT/home/bin/_rewrite_paths.py"
 chmod +x "$OUT/install.sh" "$OUT/hermes.sh"
 

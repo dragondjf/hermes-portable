@@ -57,7 +57,7 @@ RW="$DIR/home/bin/_rewrite_paths.py"
 if [ -f "$RW" ]; then
   "$VENV/bin/python" "$RW" install "$DIR"
   # verify no build path remains
-  if grep -rIl -E 'D:\\a\\hermes-portable|D:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_AGENT_ROOT__' "$SP" 2>/dev/null | grep -qE '__editable__|direct_url'; then
+  if grep -rIl -E 'D:\\\\a\\\\hermes-portable|D:/a/hermes-portable|/home/runner|/Users/runneradmin|__HERMES_PKG_ROOT__' "$SP" 2>/dev/null | grep -qE '__editable__|direct_url'; then
     echo "    [FAIL] editable metadata still has build path" >&2
     exit 1
   fi
