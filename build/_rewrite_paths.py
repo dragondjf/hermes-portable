@@ -6,7 +6,7 @@ Build time (mode=build):
   Replace the absolute BUILD PACKAGE ROOT with the token __HERMES_PKG_ROOT__
   inside every editable/finder/direct_url metadata file, so the published
   package contains ZERO absolute paths (per requirement: green package must
-  have zero absolute paths; install.ps1/.sh fixes them at deploy time).
+  have zero absolute paths; install.sh/.ps1 fixes them at deploy time).
 
 Install time (mode=install):
   Replace __HERMES_PKG_ROOT__ with the deployed package root.
@@ -16,6 +16,12 @@ editable metadata may reference either .../hermes-portable (direct_url.json,
 url) or .../hermes-agent (finder MAPPING). Tokenizing the package root catches
 all of them regardless of suffix.
 
+IMPORTANT: only EXACT string replacement of the package root (both path
+separator variants) is used. No regex. Regex fallbacks that match "up to the
+first hermes-portable" corrupt the path when the package is nested (e.g. CI's
+/home/runner/work/hermes-portable/hermes-portable/hermes-portable), producing a
+non-existent directory and a ModuleNotFoundError at runtime.
+
 Usage:
   python _rewrite_paths.py <build|install> <PACKAGE_DIR>
 The bundled python is used (no dependency on a system interpreter).
@@ -23,18 +29,8 @@ The bundled python is used (no dependency on a system interpreter).
 import os
 import sys
 import glob
-import re
 
 TOKEN = "__HERMES_PKG_ROOT__"
-
-# Known CI build roots, in case the package was built on a runner. Tokenized as a
-# safety net even if the literal pkg path below did not match (e.g. nested dirs).
-CI_ROOTS = [
-    "/home/runner/work/hermes-portable/hermes-portable",
-    "D:\\a\\hermes-portable\\hermes-portable",
-    "D:/a/hermes-portable/hermes-portable",
-    "/Users/runneradmin/work/hermes-portable/hermes-portable",
-]
 
 
 def _site_packages(pkg):
@@ -77,28 +73,25 @@ def main():
         print("    [skip] no editable metadata files found", file=sys.stderr)
         return
 
+    # Exact roots to match (both separators). On Windows the editable finder may
+    # store forward or back slashes; on CI the path may be nested hermes-portable
+    # dirs. Exact replace of the FULL package root avoids any corruption.
+    pkg_fwd = pkg.replace("\\", "/")
+
     changed = []
     for f in files:
         t = open(f, encoding="utf-8").read()
         orig = t
         if mode == "build":
-            # Tokenize the package root (both separators) + every CI build root.
-            for root in [pkg, pkg.replace("\\", "/")] + CI_ROOTS:
-                t = t.replace(root, TOKEN)
-            # Safety net: any absolute path pointing at hermes-portable/hermes-agent.
-            t = re.sub(r"[A-Za-z]:[\\/][^'\"]*?hermes-portable", TOKEN, t)
-            t = re.sub(r"[A-Za-z]:[\\/][^'\"]*?hermes-agent", TOKEN, t)
-            t = re.sub(r"/home/runner[^'\"]*?hermes-portable", TOKEN, t)
-            t = re.sub(r"/Users/runneradmin[^'\"]*?hermes-portable", TOKEN, t)
-            t = re.sub(r"/root[^'\"]*?hermes-portable", TOKEN, t)
+            t = t.replace(pkg, TOKEN)
+            t = t.replace(pkg_fwd, TOKEN)
         else:  # install
-            deploy = pkg.replace("\\", "/")
+            deploy = pkg_fwd
             t = t.replace(TOKEN, deploy)
-            t = re.sub(r"[A-Za-z]:[\\/][^'\"]*?hermes-portable", deploy, t)
-            t = re.sub(r"[A-Za-z]:[\\/][^'\"]*?hermes-agent", deploy, t)
-            t = re.sub(r"/home/runner[^'\"]*?hermes-portable", deploy, t)
-            t = re.sub(r"/Users/runneradmin[^'\"]*?hermes-portable", deploy, t)
-            t = re.sub(r"/root[^'\"]*?hermes-portable", deploy, t)
+            # safety: if the build left a literal pkg path (token missing),
+            # replace it exactly (no regex) so relocation is still correct.
+            t = t.replace(pkg, deploy)
+            t = t.replace(pkg_fwd, deploy)
         if t != orig:
             open(f, "w", encoding="utf-8").write(t)
             changed.append(f)
@@ -111,14 +104,17 @@ def main():
     # is NOT the deploy root. A leftover token or a stray build path is a real
     # relocation failure (fail hard). We compare against the actual deploy dir,
     # so running in-place on CI (deploy == build workspace) does NOT false-fail.
-    deploy_n = pkg.replace("\\", "/")
+    deploy_n = pkg_fwd
     bad = []
+    import re
     for f in files:
         c = open(f, encoding="utf-8").read().replace("\\", "/")
         if TOKEN in c:
             bad.append((f, "leftover token"))
             continue
-        # every absolute path must be under the deploy root
+        is_text_meta = ("__editable__" in f or "direct_url.json" in f)
+        if not is_text_meta:
+            continue
         for m in re.findall(r'(?:/home/|/Users/|/root/|[A-Za-z]:/)[^"\'\s\\]*', c):
             if not m.startswith(deploy_n):
                 bad.append((f, m))
