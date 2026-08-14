@@ -115,7 +115,7 @@ def main():
         is_text_meta = ("__editable__" in f or "direct_url.json" in f)
         if not is_text_meta:
             continue
-        for m in re.findall(r'(?:/home/|/Users/|/root/|[A-Za-z]:/)[^"\'\s\\]*', c):
+        for m in re.findall(r'(?:/home/|/Users/|/root/|[A-Za-z]:\\)[^\"\'\s\\]*', c):
             if not m.startswith(deploy_n):
                 bad.append((f, m))
                 break
