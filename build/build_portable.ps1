@@ -69,22 +69,14 @@ robocopy "$SRC" "$Out\hermes-agent" /E /XD $excl /XF *.pyc | Out-Null
 # 7) re-establish editable install of hermes-agent inside the bundle
 & "$Out\hermes-agent\venv\Scripts\pip.exe" install --no-build-isolation --no-cache-dir -e "$Out\hermes-agent"
 
-# 8) placeholder pyvenv.cfg build paths; editable metadata is tokenized in step 10
-#    via the shared _rewrite_paths.py (build mode) so the published package has
-#    ZERO absolute paths. install.ps1/.sh rewrites at deploy.
+# 8) placeholder pyvenv.cfg build paths; editable metadata + pyvenv.cfg are
+#    tokenized in step 8b via the shared _rewrite_paths.py (build mode) so the
+#    published package has ZERO absolute paths. install.ps1/.sh rewrites them at
+#    deploy time (and drops the build-path-carrying command/uv lines). Done in
+#    Python (not PowerShell -replace) because exact string replacement is the
+#    only reliable approach across platforms/escaping.
 #    NOTE: PowerShell is case-INsensitive, so a local `$out` would clobber the
 #    `$Out` output-dir param. Use a distinctly-named buffer.
-$pyv = "$Out\hermes-agent\venv\pyvenv.cfg"
-$rtBin = "__HERMES_RUNTIME_BIN__"
-$lines = gc $pyv
-$newLines = $lines | % {
-  if ($_ -match '^home = ') { "home = $rtBin" }
-  elseif ($_ -match '^executable = ') { "executable = $rtBin\python.exe" }
-  elseif ($_ -match '^command = ') { $null }
-  elseif ($_ -match '^uv = ') { $null }
-  else { $_ }
-}
-$newLines | sc $pyv
 
 # 10) launcher + installer + shared rewrite script from repo build/ templates
 #     Resolve the build/ dir relative to the repo root. $PWD is the directory

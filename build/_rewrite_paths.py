@@ -29,8 +29,10 @@ The bundled python is used (no dependency on a system interpreter).
 import os
 import sys
 import glob
+import re
 
 TOKEN = "__HERMES_PKG_ROOT__"
+RT_TOKEN = "__HERMES_RUNTIME_BIN__"
 
 
 def _site_packages(pkg):
@@ -47,6 +49,10 @@ def _site_packages(pkg):
     return None
 
 
+def _pyvenv_cfg(pkg):
+    return os.path.join(pkg, "hermes-agent", "venv", "pyvenv.cfg")
+
+
 def _files(sp):
     files = []
     for pat in (
@@ -58,20 +64,104 @@ def _files(sp):
     return files
 
 
+def _fix_pyvenv(pkg, mode):
+    """Relocate pyvenv.cfg so the venv points at the BUNDLED runtime (not a
+    build-machine path). Done here in Python (not fragile PowerShell -replace)
+    because the editable-metadata relocator already proved exact Python string
+    replacement is the only reliable approach across platforms/escaping.
+
+    build mode : tokenize any absolute build path -> RT_TOKEN (zero abs paths
+                 in the published package).
+    install mode: force home/executable to <deploy>/runtime/python, drop the
+                 command/uv/base-prefix lines that carry the build path, scrub
+                 any leftover build root, then verify no build path remains.
+    """
+    cfg = _pyvenv_cfg(pkg)
+    if not os.path.isfile(cfg):
+        return False
+    rt = os.path.join(pkg, "runtime", "python")
+    if os.sep == "\\":
+        exe = os.path.join(rt, "python.exe")
+    else:
+        exe = os.path.join(rt, "bin", "python3.11")
+    pkg_fwd = pkg.replace("\\", "/")
+    pkg_bak = pkg.replace("/", "\\")
+    pkg_dbl = pkg.replace("\\", "\\\\")
+
+    lines = open(cfg, encoding="utf-8").read().split("\n")
+    out = []
+    changed = False
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("home ="):
+            if mode == "build":
+                val = ln
+                for root in (pkg, pkg_fwd, pkg_bak, pkg_dbl):
+                    val = val.replace(root, RT_TOKEN)
+                out.append(val)
+            else:
+                out.append("home = %s" % rt)
+            changed = True
+        elif s.startswith("executable ="):
+            if mode == "build":
+                val = ln
+                for root in (pkg, pkg_fwd, pkg_bak, pkg_dbl):
+                    val = val.replace(root, RT_TOKEN)
+                out.append(val)
+            else:
+                out.append("executable = %s" % exe)
+            changed = True
+        elif s.startswith(("command =", "uv =", "base-prefix =",
+                           "base-exec-prefix =", "orig-prefix =")):
+            # These carry the build path; drop them (venv regenerates if needed,
+            # and hermes's repair won't find a stale build prefix to restore).
+            if mode == "build":
+                # tokenize in place rather than drop, so structure is preserved
+                val = ln
+                for root in (pkg, pkg_fwd, pkg_bak, pkg_dbl):
+                    val = val.replace(root, RT_TOKEN)
+                out.append(val)
+            else:
+                changed = True  # dropped
+            continue
+        else:
+            out.append(ln)
+    text = "\n".join(out)
+    if mode == "install":
+        # Safety scrub: expand the runtime token (produced by build mode) to the
+        # deploy runtime. We do NOT blanket-replace the deploy root here because
+        # rt CONTAINS the deploy root, which would re-expand and multiply. The
+        # home/executable lines are already force-written above, and
+        # command/uv/base-prefix lines are dropped, so any leftover absolute path
+        # is a genuine build-path leak that the verify step will catch.
+        text = text.replace(RT_TOKEN, rt)
+    if text != "\n".join(lines):
+        changed = True
+    if changed:
+        open(cfg, "w", encoding="utf-8").write(text)
+    return True
+
+
 def main():
     if len(sys.argv) != 3 or sys.argv[1] not in ("build", "install"):
         print("usage: _rewrite_paths.py <build|install> <PACKAGE_DIR>", file=sys.stderr)
         sys.exit(2)
     mode = sys.argv[1]
     pkg = os.path.abspath(sys.argv[2])
+
+    # pyvenv.cfg relocation is independent of editable metadata and MUST run even
+    # when site-packages is (for any reason) absent. Always handle it first.
+    pv_changed = _fix_pyvenv(pkg, mode)
+
     sp = _site_packages(pkg)
     if not sp:
         print("    [skip] site-packages not found", file=sys.stderr)
-        return
-    files = _files(sp)
-    if not files:
-        print("    [skip] no editable metadata files found", file=sys.stderr)
-        return
+        if mode == "build":
+            if pv_changed:
+                print("    [build] tokenized pyvenv.cfg")
+            return
+        # install: still verify pyvenv below
+    files = _files(sp) if sp else []
 
     # Exact roots to match. The editable finder (a .py SOURCE file) stores
     # Windows paths with DOUBLED backslashes (a Python string literal: 'D:\\\\a\\..'),
@@ -94,7 +184,7 @@ def main():
             # Restore with the SAME escaping the file uses, so the result is a
             # valid Python string literal. A .py finder on Windows stores paths
             # as DOUBLED backslashes ('C:\\\\Users\\..'); writing a single-
-            # backslash prefix ('C:\Users') would make '\U' a unicode-escape and
+            # backslash prefix ('C:\\Users') would make '\\U' a unicode-escape and
             # crash on import (SyntaxError: 'unicodeescape'). So match doubling.
             if "\\\\" in t:
                 sep = "\\\\"          # doubled backslash (Windows .py finder)
@@ -114,6 +204,8 @@ def main():
 
     if mode == "build":
         print("    [build] tokenized editable metadata (%d files)" % len(changed))
+        if pv_changed:
+            print("    [build] tokenized pyvenv.cfg")
         return
 
     # install mode: verify the rewrite actually removed every absolute path that
@@ -151,6 +243,16 @@ def main():
             if not _norm(m).startswith(deploy_n):
                 bad.append((f, m))
                 break
+    # pyvenv.cfg verify: must contain no token and no build path.
+    if pv_changed or os.path.isfile(_pyvenv_cfg(pkg)):
+        c = open(_pyvenv_cfg(pkg), encoding="utf-8").read().replace("\\", "/")
+        if RT_TOKEN in c or TOKEN in c:
+            bad.append((_pyvenv_cfg(pkg), "leftover token"))
+        else:
+            for m in re.findall(r'(?:/home/|/Users/|/root/|[A-Za-z]:\\)[^\"\'\s\\]*', c):
+                if not _norm(m).startswith(deploy_n):
+                    bad.append((_pyvenv_cfg(pkg), m))
+                    break
     if bad:
         for f, why in bad:
             print("    [FAIL] %s : %s" % (f, why), file=sys.stderr)

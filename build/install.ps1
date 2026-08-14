@@ -10,31 +10,12 @@ $SP = "$VENV\Lib\site-packages"
 Write-Host "==> Hermes portable installer (no admin, no network)"
 Write-Host "    Package dir: $DIR"
 
-# 1) pyvenv.cfg -> bundled runtime (fixes 'No module named encodings' and makes
-#    the package relocatable). The bundled base python lives at
-#    $DIR\runtime\python\python.exe (uv installs it there; build copies it to
-#    python.exe). Rewrite UNCONDITIONALLY: the build may have left a
-#    __HERMES_RUNTIME_BIN__ placeholder OR a stale build-machine absolute path,
-#    and we must not skip when the path is wrong. (Same fix as install.sh.)
-$RT = "$DIR\runtime\python"
-if (Test-Path $PYVCFG) {
-  $txt = gc $PYVCFG
-  # First expand any leftover token, then force the home/executable lines so a
-  # stale build path can never survive.
-  $txt = $txt -replace '__HERMES_RUNTIME_BIN__', $RT
-  $txt = $txt -replace '^home = .*', "home = $RT"
-  $txt = $txt -replace '^executable = .*', "executable = $RT\python.exe"
-  $txt = $txt -replace '^command = .*', ''
-  $txt = $txt -replace '^uv = .*', ''
-  $txt | sc $PYVCFG
-  # Hard guard: if a token or the CI build path survives, the package is NOT
-  # relocatable. Fail loudly instead of shipping a broken pyvenv.cfg.
-  $chk = gc $PYVCFG -Raw
-  if ($chk -match '__HERMES_RUNTIME_BIN__' -or $chk -match 'D:/a/hermes-portable') {
-    Write-Error "FAIL: pyvenv.cfg still has token/build path after rewrite"; exit 1
-  }
-  Write-Host "    [ok] pyvenv.cfg -> bundled runtime $RT"
-} else { Write-Host "    [warn] pyvenv.cfg missing" }
+# 1) pyvenv.cfg relocation is handled by the shared _rewrite_paths.py (called in
+#    step 4 below) — it forces home/executable to the bundled runtime and drops
+#    the build-path-carrying command/uv lines, using exact Python string
+#    replacement (reliable across platforms, unlike PowerShell -replace). This is
+#    what makes the package genuinely relocatable (hermes's startup repair won't
+#    find a stale build prefix to restore).
 
 # 2) ensure uv binary present
 New-Item -ItemType Directory -Force -Path "$DIR\home\bin" | Out-Null
