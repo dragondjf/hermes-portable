@@ -83,7 +83,18 @@ def _fix_pyvenv(pkg, mode):
     if os.sep == "\\":
         exe = os.path.join(rt, "python.exe")
     else:
-        exe = os.path.join(rt, "bin", "python3.11")
+        # Detect the actual venv interpreter (python3.11 / 3.12 / 3.13 / ...).
+        # Avoid hardcoding a minor version so the package works on any Python
+        # the build bundled.
+        exe = None
+        for cand in sorted(glob.glob(os.path.join(rt, "bin", "python3.*"))):
+            base = os.path.basename(cand)
+            if base.endswith(".exe") or base.endswith("-config") or base.endswith(".py"):
+                continue
+            exe = cand
+            break
+        if exe is None:
+            exe = os.path.join(rt, "bin", "python3")  # fallback
     pkg_fwd = pkg.replace("\\", "/")
     pkg_bak = pkg.replace("/", "\\")
     pkg_dbl = pkg.replace("\\", "\\\\")

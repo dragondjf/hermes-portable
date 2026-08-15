@@ -12,7 +12,8 @@
 #      package.
 param(
   [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
-  [string]$Out = (Join-Path $PWD "hermes-portable")
+  [string]$Out = (Join-Path $PWD "hermes-portable"),
+  [string]$PyVer = $(if ($env:PY_VER) { $env:PY_VER } else { "3.11" })   # bundled CPython minor (3.11/3.12/3.13)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,12 +35,12 @@ uv pip freeze --python "$VENV\Scripts\python.exe" --exclude-editable | Out-File 
 Write-Host "==> captured deps from official venv"
 
 # 2) bundle a standalone CPython via uv
-uv python install 3.11 | Out-Null
-$pyBin = (uv python find 3.11 --no-project).Trim()
-# $pyBin is .../cpython-3.11.15-windows-x86_64-none/python3.11.exe; the runtime
-# dir we bundle is its parent (one level up), which holds python3.11.exe.
+uv python install $PyVer | Out-Null
+$pyBin = (uv python find $PyVer --no-project).Trim()
+# $pyBin is .../cpython-<ver>-windows-x86_64-none/python3.<minor>.exe; the runtime
+# dir we bundle is its parent (one level up), which holds python3.<minor>.exe.
 $pyPrefix = Split-Path $pyBin
-Write-Host "==> bundling python from $pyPrefix"
+Write-Host "==> bundling python $PyVer from $pyPrefix"
 
 Remove-Item -Recurse -Force $Out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Out, "$Out\runtime", "$Out\hermes-agent", "$Out\home" | Out-Null

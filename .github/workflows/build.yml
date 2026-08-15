@@ -23,20 +23,42 @@ jobs:
   # Linux (x64 + arm64) and macOS — official installer + repackage.
   # ---------------------------------------------------------------------------
   unix:
-    name: ${{ matrix.runner }} (${{ matrix.arch }})
+    name: ${{ matrix.runner }} (${{ matrix.arch }}) py${{ matrix.py }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-22.04
             arch: x64
+            py: '3.11'
+          - runner: ubuntu-22.04
+            arch: x64
+            py: '3.12'
+          - runner: ubuntu-22.04
+            arch: x64
+            py: '3.13'
           - runner: ubuntu-22.04-arm
             arch: arm64
+            py: '3.11'
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+            py: '3.12'
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+            py: '3.13'
           - runner: macos-latest
             arch: x64
+            py: '3.11'
+          - runner: macos-latest
+            arch: x64
+            py: '3.12'
+          - runner: macos-latest
+            arch: x64
+            py: '3.13'
     runs-on: ${{ matrix.runner }}
     env:
       HERMES_HOME: ${{ github.workspace }}/official-hermes
+      PY_VER: ${{ matrix.py }}
     steps:
       - name: Checkout this packaging repo
         uses: actions/checkout@v4
@@ -93,23 +115,31 @@ jobs:
       - name: Package artifact
         shell: bash
         run: |
-          tar czf "hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz" hermes-portable
+          tar czf "hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}-py${{ matrix.py }}.tar.gz" hermes-portable
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz
+          files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}-py${{ matrix.py }}.tar.gz
           overwrite: true
 
   # ---------------------------------------------------------------------------
   # Windows.
   # ---------------------------------------------------------------------------
   windows:
-    name: windows-latest (x64)
+    name: windows-latest (x64) py${{ matrix.py }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - py: '3.11'
+          - py: '3.12'
+          - py: '3.13'
     env:
       HERMES_HOME: ${{ github.workspace }}\official-hermes
+      PY_VER: ${{ matrix.py }}
     steps:
       - name: Checkout this packaging repo
         uses: actions/checkout@v4
@@ -168,11 +198,11 @@ jobs:
       - name: Package artifact
         shell: pwsh
         run: |
-          Compress-Archive -Path hermes-portable -DestinationPath "hermes-portable-windows-latest-x64.zip"
+          Compress-Archive -Path hermes-portable -DestinationPath "hermes-portable-windows-latest-x64-py${{ matrix.py }}.zip"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: hermes-portable-windows-latest-x64.zip
+          files: hermes-portable-windows-latest-x64-py${{ matrix.py }}.zip
           overwrite: true
