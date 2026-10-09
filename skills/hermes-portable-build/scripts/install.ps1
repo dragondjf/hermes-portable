@@ -66,4 +66,4 @@ Write-Host "    [ok] cleared stale .pyc caches"
 if (& "$VENV\Scripts\python.exe" -c "import hermes_cli" 2>$null) { Write-Host "    [ok] hermes_cli importable" }
 else { Write-Host "    [warn] hermes_cli not importable; debug with full env" }
 
-Write-Host "==> Done. Run:  pwsh $DIR\hermes.ps1 version"
+Write-Host "==> Done. Run:  pwsh $DIR\hermes.ps1 --version"

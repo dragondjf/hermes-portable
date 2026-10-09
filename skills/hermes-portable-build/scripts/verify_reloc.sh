@@ -3,7 +3,7 @@
 #   - relocatable: runs from a NON-standard path (copied out of the build dir)
 #   - offline:     no external network connect() under a wiped env
 #   - isolated:    no writes to system dirs (/etc /usr /opt /root /var)
-#   - functional:  `hermes.sh version` shows the deploy path, kanban persists
+#   - functional:  `hermes.sh --version` shows the deploy path, kanban persists
 #
 # Designed to run inside CI (after `tar xzf`/unpack) with only the package dir
 # as input. Mirrors build/verify_reloc.ps1 on Windows.
@@ -31,7 +31,7 @@ rm -rf "$FRESH"; cp -a "$PKG/home" "$FRESH"
 RUN="env -i HOME=$FRESH HERMES_HOME=$FRESH PATH=$PKG/hermes-agent/venv/bin:/usr/bin:/bin bash $PKG/hermes.sh"
 
 echo "==> version (must run and leak no build-machine path)"
-OUT=$($RUN version 2>&1)
+OUT=$($RUN --version 2>&1)
 echo "$OUT"
 # hermes v0.21.x derives version identity from install-stamp/git and no
 # longer prints the old 'Install directory:' line, so assert the invariants
@@ -47,7 +47,7 @@ echo "==> strace: assert no external network + no system-dir writes"
 TRACE=/tmp/hermes-reloc-trace.txt
 rm -f "$TRACE"
 if command -v strace >/dev/null 2>&1; then
-  strace -f -e trace=network,file -o "$TRACE" $RUN version >/dev/null 2>&1 || true
+  strace -f -e trace=network,file -o "$TRACE" $RUN --version >/dev/null 2>&1 || true
   if [ -f "$TRACE" ]; then
     # NOTE: under `set -o pipefail` an empty grep returns 1, so guard with || true.
     # `wc -l` pads with spaces on BSD/macOS — trim it.

@@ -103,7 +103,7 @@ jobs:
           rm -rf smoke-test && cp -a hermes-portable smoke-test
           cd smoke-test
           bash install.sh
-          bash hermes.sh version
+          bash hermes.sh --version
 
       - name: Green-package verification (relocatable + offline + isolated)
         shell: bash
@@ -200,7 +200,7 @@ jobs:
           Copy-Item -Recurse -Force hermes-portable smoke-test
           cd smoke-test
           pwsh install.ps1
-          pwsh hermes.ps1 version
+          pwsh hermes.ps1 --version
 
       - name: Green-package verification (relocatable + offline + isolated)
         shell: pwsh

@@ -35,7 +35,7 @@ $env:HERMES_HOME = $FRESH
 $env:PATH = "$(Join-Path $PKG 'hermes-agent\venv\Scripts');$env:SystemRoot\System32"
 
 Write-Host "==> version (must run + identify itself; deploy-path match is best-effort)"
-$OUT = & "$PKG\hermes.ps1" version 2>&1 | Out-String
+$OUT = & "$PKG\hermes.ps1" --version 2>&1 | Out-String
 Write-Host $OUT
 # hermes v0.21.x derives version identity from install-stamp/git; the exact
 # banner format changed, so assert identity (any 'hermes' mention) plus the

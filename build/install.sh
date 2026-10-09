@@ -76,4 +76,4 @@ else
   echo "    [warn] hermes_cli not importable; debug with full env"
 fi
 
-echo "==> Done. Run:  bash $DIR/hermes.sh version"
+echo "==> Done. Run:  bash $DIR/hermes.sh --version"

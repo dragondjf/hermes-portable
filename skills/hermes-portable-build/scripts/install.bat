@@ -82,5 +82,5 @@ if errorlevel 1 (
   echo     [ok] hermes_cli importable
 )
 
-echo ==^> Done. Run:  %DIR%\hermes.bat version
+echo ==^> Done. Run:  %DIR%\hermes.bat --version
 endlocal

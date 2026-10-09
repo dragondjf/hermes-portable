@@ -29,7 +29,7 @@ hermes-portable/
 tar xzf hermes-portable.tar.gz -C ~/
 cd ~/hermes-portable
 bash install.sh          # rewrites pyvenv.cfg, writes offline config, fixes paths
-bash hermes.sh version   # verify
+bash hermes.sh --version   # verify
 bash hermes.sh chat      # use it (point it at your LLM endpoint)
 ```
 
