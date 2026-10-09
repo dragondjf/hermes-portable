@@ -18,14 +18,31 @@ set -euo pipefail
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 OUT="${OUT:-$PWD/hermes-portable}"
-PY_VER="${PY_VER:-3.11}"            # bundled CPython minor (3.10/3.11/3.12/3.13/3.14)
+PY_VER="${PY_VER:-3.14}"            # bundled CPython minor — must match the official
+                                    # PM pin era (pm/lock.json pins 3.14.7 for v0.21.6,
+                                    # and dependency pins carry python_version>='3.14'
+                                    # markers, so 3.11-3.13 bundles would miss deps)
 SRC="$HERMES_HOME/hermes-agent"
-VENV="$HERMES_HOME/hermes-agent/venv"
+
+# v0.21+ (PM era): the official installer's dependency venv lives OUTSIDE the
+# checkout, under <HERMES_HOME>/installs/<install-key>/environments/<gen>/ —
+# and PM DELETES the legacy in-tree hermes-agent/venv once it commits a
+# generation. Discover the PM venv (a fresh official install has exactly one);
+# fall back to the legacy in-tree venv for pre-PM (v0.20.x) installs.
+VENV=""
+for _cfg in "$HERMES_HOME"/installs/*/environments/*/pyvenv.cfg; do
+  [ -f "$_cfg" ] || continue
+  VENV="$(dirname "$_cfg")"
+  break
+done
+[ -n "$VENV" ] || VENV="$SRC/venv"
 
 echo "==> building hermes-portable (Python $PY_VER) from official install at $HERMES_HOME"
+echo "==> official dependency venv: $VENV"
 
 if [ ! -d "$VENV" ]; then
-  echo "Official Hermes venv not found at $VENV — run the official installer first:" >&2
+  echo "Official Hermes venv not found (looked in $HERMES_HOME/installs/*/environments/*/ and $SRC/venv)" >&2
+  echo "— run the official installer first:" >&2
   echo "  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" >&2
   exit 1
 fi
@@ -61,6 +78,12 @@ cp -aL "$PY_PREFIX" "$OUT/runtime/python"
 
 # 5) reinstall the same pinned deps into the bundled venv
 "$OUT/hermes-agent/venv/bin/pip" install --no-cache-dir -r "$REQ_TXT"
+
+# 5b) build backend for the editable install: --no-build-isolation imports the
+#     backend from the target venv, and pyproject pins setuptools==83.0.0 +
+#     wheel. Python 3.12+ venvs no longer seed setuptools via ensurepip, and
+#     the freeze may not carry them, so install explicitly (idempotent).
+"$OUT/hermes-agent/venv/bin/pip" install --no-cache-dir "setuptools==83.0.0" wheel
 
 # 6) copy the hermes-agent source tree (drop git/tests/node artifacts)
 rsync -a --exclude='.git' --exclude='tests' --exclude='tests-js' \

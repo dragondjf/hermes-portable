@@ -6,7 +6,6 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RT_BIN="$DIR/runtime/python/bin"
 VENV="$DIR/hermes-agent/venv"
 PYVCFG="$VENV/pyvenv.cfg"
-SP="$VENV/lib/python3.11/site-packages"
 
 echo "==> Hermes portable installer (no root, no network)"
 echo "    Package dir: $DIR"
@@ -16,11 +15,13 @@ echo "    Package dir: $DIR"
 #    __HERMES_RUNTIME_BIN__ placeholder OR a stale build-machine absolute path.
 #    Do NOT use $VENV/bin/python here — pyvenv.cfg may still point outside the
 #    package, so that interpreter cannot start yet. Use sed -i.bak (GNU + BSD).
+#    `executable` uses the version-agnostic bin/python3 (uv's standalone CPython
+#    always provides it; _rewrite_paths.py later re-detects the exact minor).
 RT_BIN="$DIR/runtime/python/bin"
 if [ -f "$PYVCFG" ]; then
   sed -i.bak "s#__HERMES_RUNTIME_BIN__#$RT_BIN#g" "$PYVCFG"
   sed -i.bak -E "s#^home = .*#home = $RT_BIN#" "$PYVCFG"
-  sed -i.bak -E "s#^executable = .*#executable = $RT_BIN/python3.11#" "$PYVCFG"
+  sed -i.bak -E "s#^executable = .*#executable = $RT_BIN/python3#" "$PYVCFG"
   sed -i.bak -E "/^command = /d" "$PYVCFG"
   sed -i.bak -E "/^uv = /d" "$PYVCFG"
   rm -f "$PYVCFG.bak"

@@ -27,34 +27,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Single py per platform, pinned to the official PM runtime era.
+        # hermes v0.21.x installs its dependency env on Python 3.14
+        # (pm/lock.json) and its dep pins carry python_version >= '3.14'
+        # markers, so only a 3.14 bundle reproduces the official dep set.
         include:
           - runner: ubuntu-22.04
             arch: x64
-            py: '3.11'
-          - runner: ubuntu-22.04
-            arch: x64
-            py: '3.12'
-          - runner: ubuntu-22.04
-            arch: x64
-            py: '3.13'
+            py: '3.14'
           - runner: ubuntu-22.04-arm
             arch: arm64
-            py: '3.11'
-          - runner: ubuntu-22.04-arm
-            arch: arm64
-            py: '3.12'
-          - runner: ubuntu-22.04-arm
-            arch: arm64
-            py: '3.13'
+            py: '3.14'
           - runner: macos-latest
             arch: x64
-            py: '3.11'
-          - runner: macos-latest
-            arch: x64
-            py: '3.12'
-          - runner: macos-latest
-            arch: x64
-            py: '3.13'
+            py: '3.14'
     runs-on: ${{ matrix.runner }}
     env:
       HERMES_HOME: ${{ github.workspace }}/official-hermes
@@ -69,7 +55,7 @@ jobs:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v5
         with:
-          version: '0.11.28'
+          version: '0.12.3'
 
       - name: Official install (curl install.sh)
         shell: bash
@@ -137,10 +123,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # py pinned to the official PM runtime era (hermes v0.21.x = 3.14).
         include:
-          - py: '3.11'
-          - py: '3.12'
-          - py: '3.13'
+          - py: '3.14'
     env:
       HERMES_HOME: ${{ github.workspace }}\official-hermes
       PY_VER: ${{ matrix.py }}
@@ -154,7 +139,7 @@ jobs:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v5
         with:
-          version: '0.11.28'
+          version: '0.12.3'
 
       - name: Official install (iex install.ps1)
         shell: pwsh
