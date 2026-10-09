@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       hermes_ref:
-        description: 'hermes-agent SOURCE ref to package: a commit SHA or date-based tag (e.g. v2026.8.3). Leave EMPTY to install latest main. NOTE: this is NOT the packaging version number.'
+        description: 'hermes-agent SOURCE ref to package: a commit SHA or release tag (v0.21.6+ semver, or v2026.9.24 date-style). Leave EMPTY to use the HERMES_REF file at repo root (final fallback: latest main). NOTE: this is NOT the packaging version number.'
         required: false
         default: ''
       version_label:
@@ -76,13 +76,17 @@ jobs:
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
-          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
-          # NOTE: hermes-agent source uses date-based tags (e.g. v2026.8.3) and commit SHAs,
-          # NOT semantic versions like 0.20.0 — so we never pass the packaging tag name as --commit.
-          COMMIT_ARG=""
-          if [ -n "${{ github.event.inputs.hermes_ref }}" ]; then
-            COMMIT_ARG="--commit ${{ github.event.inputs.hermes_ref }}"
+          # Pin to a real hermes-agent source ref: the workflow_dispatch input
+          # when given, else the HERMES_REF file committed at repo root (so v*
+          # tag builds are reproducible instead of tracking hermes main; the
+          # installer verifies the ref is on main via merge-base --is-ancestor).
+          REF="${{ github.event.inputs.hermes_ref }}"
+          if [ -z "$REF" ] && [ -f HERMES_REF ]; then
+            REF="$(tr -d '[:space:]' < HERMES_REF)"
           fi
+          COMMIT_ARG=""
+          [ -n "$REF" ] && COMMIT_ARG="--commit $REF"
+          echo "==> hermes-agent source ref: ${REF:-latest main}"
           curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
             | bash -s -- --hermes-home "$HERMES_HOME" $COMMIT_ARG --skip-setup --skip-browser
 
@@ -157,16 +161,23 @@ jobs:
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
-          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          # Pin to a real hermes-agent source ref: the workflow_dispatch input
+          # when given, else the HERMES_REF file committed at repo root (so v*
+          # tag builds are reproducible instead of tracking hermes main; the
+          # installer verifies the ref is on main via merge-base --is-ancestor).
+          $ref = "${{ github.event.inputs.hermes_ref }}".Trim()
+          if (-not $ref -and (Test-Path HERMES_REF)) {
+            $ref = (Get-Content HERMES_REF -Raw).Trim()
+          }
+          Write-Host "==> hermes-agent source ref: $(if ($ref) { $ref } else { 'latest main' })"
           # NOTE: download the installer to a file and invoke it with `&` — `iex (irm ...) -Arg`
           # passes -Arg to iex (which has no such param) and fails.
           # Official installer reads HERMES_HOME from the env (workflow sets it),
-          # so we only pass the -SkipSetup switch. Download to a file and invoke
-          # with `&` — avoids iex param-binding pitfalls. (Invoke-RestMethod has
-          # no -Encoding, so we rely on its default UTF-8 output.)
+          # so we only pass -SkipSetup (+ -Commit when pinning).
           $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
           irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1
-          & $installPs1 -SkipSetup
+          if ($ref) { & $installPs1 -Commit $ref -SkipSetup }
+          else      { & $installPs1 -SkipSetup }
 
       - name: Repackage into portable bundle
         shell: pwsh
