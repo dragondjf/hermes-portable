@@ -81,7 +81,15 @@ jobs:
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
           OUT: ${{ github.workspace }}/hermes-portable
-        run: bash build/build_portable.sh
+        run: |
+          # Job-log download needs admin rights, so surface the failure tail as
+          # a workflow annotation (visible on the public run page) on error.
+          set -o pipefail
+          bash build/build_portable.sh 2>&1 | tee "$RUNNER_TEMP/build_portable.log" || {
+            MSG="$(tail -c 6000 "$RUNNER_TEMP/build_portable.log" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')"
+            echo "::error title=build_portable.sh failed (log tail)::${MSG}"
+            exit 1
+          }
 
       - name: Smoke test (install + version, offline)
         shell: bash
@@ -170,7 +178,15 @@ jobs:
           HERMES_HOME: ${{ env.HERMES_HOME }}
           OUT: ${{ github.workspace }}\hermes-portable
           SCRIPT_DIR: ${{ github.workspace }}\build
-        run: pwsh build/build_portable.ps1
+        run: |
+          # Job-log download needs admin rights, so surface the failure tail as
+          # a workflow annotation (visible on the public run page) on error.
+          pwsh build/build_portable.ps1 *>&1 | Tee-Object -FilePath "$env:TEMP\build_portable.log"
+          if ($LASTEXITCODE -ne 0) {
+            $tail = (Get-Content "$env:TEMP\build_portable.log" -Tail 60 | ForEach-Object { $_ -replace '%', '%25' }) -join '%0A'
+            Write-Host "::error title=build_portable.ps1 failed (log tail)::$tail"
+            exit 1
+          }
 
       - name: Smoke test (install + version, offline)
         shell: pwsh
