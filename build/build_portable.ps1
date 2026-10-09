@@ -19,12 +19,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $SRC = Join-Path $HermesHome "hermes-agent"
 
-# v0.21+ (PM era): the official dependency venv lives OUTSIDE the checkout,
-# under <HermesHome>\installs\<install-key>\environments\<gen>\ — and PM
-# DELETES the legacy in-tree hermes-agent\venv once it commits a generation.
-# Discover the PM venv (fresh official installs have exactly one); fall back
-# to the legacy in-tree venv for pre-PM (v0.20.x) installs.
-$pmVenv = Get-Item -Path (Join-Path $HermesHome 'installs\*\environments\*\pyvenv.cfg') -ErrorAction SilentlyContinue | Select-Object -First 1
+# v0.21+ (PM era): the official dependency venv lives OUTSIDE the checkout —
+# CI logs show PM builds it at <HermesHome>\installs\<install-key>environments\
+# <gen>\venv\ (staging a source copy into environments\<gen>\workspace and
+# wheel-installing hermes there; the checkout itself keeps NO venv). Try both
+# depths, then fall back to the legacy in-tree venv (v0.20.x installs).
+$pmVenv = Get-Item -Path (Join-Path $HermesHome 'installs\*\environments\*\venv\pyvenv.cfg'),
+                      (Join-Path $HermesHome 'installs\*\environments\*\pyvenv.cfg') `
+                    -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($pmVenv) { $VENV = $pmVenv.DirectoryName } else { $VENV = Join-Path $SRC "venv" }
 
 Write-Host "==> building hermes-portable from official install at $HermesHome"
@@ -39,8 +41,14 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Error "uv not f
 # 1) capture the official dependency set (pinned versions)
 #    Use `uv pip freeze` (not $VENV\Scripts\pip.exe) because uv-built venvs may
 #    lack a standalone pip executable. uv is on PATH (setup-uv in CI).
+#    FILTER OUT hermes-agent: PM wheel-installs it as hermes-agent==0.0.0
+#    (from its staged workspace copy) — not editable, so --exclude-editable
+#    keeps it, and reinstalling it would hit a dead file:// URL / PyPI. Step 7
+#    editable-installs the bundled source tree instead.
 $req = Join-Path $env:TEMP "hermes-reqs.txt"
-uv pip freeze --python "$VENV\Scripts\python.exe" --exclude-editable | Out-File -Encoding utf8 $req
+uv pip freeze --python "$VENV\Scripts\python.exe" --exclude-editable |
+  Where-Object { $_ -notmatch '^(hermes-agent|-e .*hermes|#.*hermes-agent)' } |
+  Out-File -Encoding utf8 $req
 Write-Host "==> captured deps from official venv"
 
 # 2) bundle a standalone CPython via uv

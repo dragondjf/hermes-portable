@@ -25,12 +25,14 @@ PY_VER="${PY_VER:-3.14}"            # bundled CPython minor — must match the o
 SRC="$HERMES_HOME/hermes-agent"
 
 # v0.21+ (PM era): the official installer's dependency venv lives OUTSIDE the
-# checkout, under <HERMES_HOME>/installs/<install-key>/environments/<gen>/ —
-# and PM DELETES the legacy in-tree hermes-agent/venv once it commits a
-# generation. Discover the PM venv (a fresh official install has exactly one);
-# fall back to the legacy in-tree venv for pre-PM (v0.20.x) installs.
+# checkout — CI logs show PM builds it at <HERMES_HOME>/installs/<install-key>/
+# environments/<gen>/venv/ (it stages a source COPY into environments/<gen>/
+# workspace and wheel-installs hermes there; the checkout itself has NO venv,
+# which PM deletes after committing a generation). Try both depths, then fall
+# back to the legacy in-tree venv for pre-PM (v0.20.x) installs.
 VENV=""
-for _cfg in "$HERMES_HOME"/installs/*/environments/*/pyvenv.cfg; do
+for _cfg in "$HERMES_HOME"/installs/*/environments/*/venv/pyvenv.cfg \
+            "$HERMES_HOME"/installs/*/environments/*/pyvenv.cfg; do
   [ -f "$_cfg" ] || continue
   VENV="$(dirname "$_cfg")"
   break
@@ -50,9 +52,16 @@ fi
 # 1) capture the official dependency set (pinned versions) from the real venv.
 #    Use `uv pip freeze` (not $VENV/bin/pip) because uv-built venvs may lack a
 #    standalone pip executable. uv is on PATH (setup-uv in CI).
+#    FILTER OUT hermes-agent: PM wheel-installs it into the env as
+#    hermes-agent==0.0.0 (from its staged workspace copy) — not editable, so
+#    --exclude-editable keeps it, and reinstalling it would either hit PyPI
+#    (no such version) or a dead file:// URL. We editable-install the bundled
+#    source tree ourselves in step 7.
 REQ_TXT="$(mktemp)"
-uv pip freeze --python "$VENV/bin/python" --exclude-editable > "$REQ_TXT" 2>/dev/null \
-  || "$VENV/bin/python" -m pip freeze --exclude-editable > "$REQ_TXT"
+uv pip freeze --python "$VENV/bin/python" --exclude-editable 2>/dev/null \
+  | grep -vE '^(hermes-agent|-e .*hermes|#.*hermes-agent)' > "$REQ_TXT" \
+  || "$VENV/bin/python" -m pip freeze --exclude-editable \
+  | grep -vE '^(hermes-agent|-e .*hermes|#.*hermes-agent)' > "$REQ_TXT"
 echo "==> captured $(wc -l < "$REQ_TXT") pinned deps from official venv"
 
 # 2) bundle a standalone CPython via uv (so the package needs no external interpreter)
