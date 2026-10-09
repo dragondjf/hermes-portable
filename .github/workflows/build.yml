@@ -84,10 +84,12 @@ jobs:
         run: |
           # Job-log download needs admin rights, so surface the failure tail as
           # a workflow annotation (visible on the public run page) on error.
+          # NOTE: build the annotation with tr — sed cannot substitute newlines
+          # (its pattern space is line-based), and ::error takes ONE line.
           set -o pipefail
           bash build/build_portable.sh 2>&1 | tee "$RUNNER_TEMP/build_portable.log" || {
-            MSG="$(tail -c 6000 "$RUNNER_TEMP/build_portable.log" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')"
-            echo "::error title=build_portable.sh failed (log tail)::${MSG}"
+            MSG="$(tail -c 3000 "$RUNNER_TEMP/build_portable.log" | tr -d '\r' | tr '\n' '|' | sed 's/%/%25/g')"
+            echo "::error title=build_portable.sh failed (log tail)::${MSG:0:650}"
             exit 1
           }
 
