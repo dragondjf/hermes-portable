@@ -18,13 +18,31 @@ set -euo pipefail
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 OUT="${OUT:-$PWD/hermes-portable}"
+PY_VER="${PY_VER:-3.14}"            # bundled CPython minor — must match the official
+                                    # PM pin era (pm/lock.json pins 3.14.7 for v0.21.6,
+                                    # and dependency pins carry python_version>='3.14'
+                                    # markers, so 3.11-3.13 bundles would miss deps)
 SRC="$HERMES_HOME/hermes-agent"
-VENV="$HERMES_HOME/hermes-agent/venv"
 
-echo "==> building hermes-portable from official install at $HERMES_HOME"
+# v0.21+ (PM era): the official installer's dependency venv lives OUTSIDE the
+# checkout, under <HERMES_HOME>/installs/<install-key>/environments/<gen>/ —
+# and PM DELETES the legacy in-tree hermes-agent/venv once it commits a
+# generation. Discover the PM venv (a fresh official install has exactly one);
+# fall back to the legacy in-tree venv for pre-PM (v0.20.x) installs.
+VENV=""
+for _cfg in "$HERMES_HOME"/installs/*/environments/*/pyvenv.cfg; do
+  [ -f "$_cfg" ] || continue
+  VENV="$(dirname "$_cfg")"
+  break
+done
+[ -n "$VENV" ] || VENV="$SRC/venv"
+
+echo "==> building hermes-portable (Python $PY_VER) from official install at $HERMES_HOME"
+echo "==> official dependency venv: $VENV"
 
 if [ ! -d "$VENV" ]; then
-  echo "Official Hermes venv not found at $VENV — run the official installer first:" >&2
+  echo "Official Hermes venv not found (looked in $HERMES_HOME/installs/*/environments/*/ and $SRC/venv)" >&2
+  echo "— run the official installer first:" >&2
   echo "  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" >&2
   exit 1
 fi
@@ -41,9 +59,9 @@ echo "==> captured $(wc -l < "$REQ_TXT") pinned deps from official venv"
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv not found — install it or prepend to PATH"; exit 1
 fi
-uv python install 3.11 >/dev/null
-PY_PREFIX="$(cd "$(dirname "$(uv python find 3.11 --no-project)")/.." && pwd -P)"
-echo "==> bundling python from $PY_PREFIX"
+uv python install "$PY_VER" >/dev/null
+PY_PREFIX="$(cd "$(dirname "$(uv python find "$PY_VER" --no-project)")/.." && pwd -P)"
+echo "==> bundling python $PY_VER from $PY_PREFIX"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime" "$OUT/hermes-agent" "$OUT/home"
@@ -61,6 +79,12 @@ cp -aL "$PY_PREFIX" "$OUT/runtime/python"
 # 5) reinstall the same pinned deps into the bundled venv
 "$OUT/hermes-agent/venv/bin/pip" install --no-cache-dir -r "$REQ_TXT"
 
+# 5b) build backend for the editable install: --no-build-isolation imports the
+#     backend from the target venv, and pyproject pins setuptools==83.0.0 +
+#     wheel. Python 3.12+ venvs no longer seed setuptools via ensurepip, and
+#     the freeze may not carry them, so install explicitly (idempotent).
+"$OUT/hermes-agent/venv/bin/pip" install --no-cache-dir "setuptools==83.0.0" wheel
+
 # 6) copy the hermes-agent source tree (drop git/tests/node artifacts)
 rsync -a --exclude='.git' --exclude='tests' --exclude='tests-js' \
   --exclude='node_modules' --exclude='dist' --exclude='*.egg-info' \
@@ -72,22 +96,12 @@ rsync -a --exclude='.git' --exclude='tests' --exclude='tests-js' \
 uv pip install --python "$OUT/hermes-agent/venv/bin/python" --no-build-isolation --no-cache-dir \
   -e "$OUT/hermes-agent/"
 
-# 8) placeholder pyvenv.cfg paths; install.sh rewrites at deploy.
-#    Placeholder BOTH `home`, `executable` AND `command` so the package is
-#    relocatable. __HERMES_RUNTIME_BIN__ is the bundled runtime dir; it is
-#    expanded by install.sh to the real (deploy-time) absolute path.
-PYVCFG="$OUT/hermes-agent/venv/pyvenv.cfg"
-RT="__HERMES_RUNTIME_BIN__"
-"$OUT/runtime/python/bin/python3" - "$PYVCFG" "$RT" <<'PY'
-import sys, re
-p, rt = sys.argv[1], sys.argv[2]
-s = open(p, encoding="utf-8").read()
-s = re.sub(r'^home = .*', f'home = {rt}/bin', s, flags=re.M)
-s = re.sub(r'^executable = .*', f'executable = {rt}/bin/python3.11', s, flags=re.M)
-s = re.sub(r'^command = .*', '', s, flags=re.M)
-s = re.sub(r'^uv = .*\n', '', s, flags=re.M)
-open(p, "w", encoding="utf-8").write(s)
-PY
+# 8) pyvenv.cfg build-path placeholder is handled by the shared
+#    _rewrite_paths.py in build mode (step 8b below), which tokenizes
+#    home/executable/command/uv using exact string replacement that is
+#    version-agnostic (no hardcoded python3.11). install.sh/.ps1 relocates
+#    them at deploy time. The inline re.sub here was removed to avoid the
+#    hardcoded minor-version suffix that broke 3.12/3.13.
 
 # 9) offline config placeholder (install.sh writes the real one)
 printf '# Written by install.sh\n' > "$OUT/home/config.yaml"

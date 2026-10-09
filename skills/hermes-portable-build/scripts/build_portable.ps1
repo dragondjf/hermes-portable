@@ -12,16 +12,26 @@
 #      package.
 param(
   [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
-  [string]$Out = (Join-Path $PWD "hermes-portable")
+  [string]$Out = (Join-Path $PWD "hermes-portable"),
+  [string]$PyVer = $(if ($env:PY_VER) { $env:PY_VER } else { "3.14" })  # must match the official PM pin era (v0.21.6 pins 3.14.7; dep pins carry python_version>='3.14' markers)
 )
 
 $ErrorActionPreference = 'Stop'
 $SRC = Join-Path $HermesHome "hermes-agent"
-$VENV = Join-Path $SRC "venv"
+
+# v0.21+ (PM era): the official dependency venv lives OUTSIDE the checkout,
+# under <HermesHome>\installs\<install-key>\environments\<gen>\ — and PM
+# DELETES the legacy in-tree hermes-agent\venv once it commits a generation.
+# Discover the PM venv (fresh official installs have exactly one); fall back
+# to the legacy in-tree venv for pre-PM (v0.20.x) installs.
+$pmVenv = Get-Item -Path (Join-Path $HermesHome 'installs\*\environments\*\pyvenv.cfg') -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($pmVenv) { $VENV = $pmVenv.DirectoryName } else { $VENV = Join-Path $SRC "venv" }
+
 Write-Host "==> building hermes-portable from official install at $HermesHome"
+Write-Host "==> official dependency venv: $VENV"
 
 if (-not (Test-Path $VENV)) {
-  Write-Error "Official Hermes venv not found at $VENV — run the official installer first: iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
+  Write-Error "Official Hermes venv not found (looked in $HermesHome\installs\*\environments\* and $SRC\venv) — run the official installer first: iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
   exit 1
 }
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Error "uv not found"; exit 1 }
@@ -34,12 +44,12 @@ uv pip freeze --python "$VENV\Scripts\python.exe" --exclude-editable | Out-File 
 Write-Host "==> captured deps from official venv"
 
 # 2) bundle a standalone CPython via uv
-uv python install 3.11 | Out-Null
-$pyBin = (uv python find 3.11 --no-project).Trim()
-# $pyBin is .../cpython-3.11.15-windows-x86_64-none/python3.11.exe; the runtime
-# dir we bundle is its parent (one level up), which holds python3.11.exe.
+uv python install $PyVer | Out-Null
+$pyBin = (uv python find $PyVer --no-project).Trim()
+# $pyBin is .../cpython-<ver>-windows-x86_64-none/python3.<minor>.exe; the runtime
+# dir we bundle is its parent (one level up), which holds python3.<minor>.exe.
 $pyPrefix = Split-Path $pyBin
-Write-Host "==> bundling python from $pyPrefix"
+Write-Host "==> bundling python $PyVer from $pyPrefix"
 
 Remove-Item -Recurse -Force $Out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Out, "$Out\runtime", "$Out\hermes-agent", "$Out\home" | Out-Null
@@ -61,6 +71,12 @@ if ($realPy -and -not (Test-Path "$pyDest\python.exe")) {
 
 # 5) reinstall the same pinned deps into the bundled venv
 & "$Out\hermes-agent\venv\Scripts\pip.exe" install --no-cache-dir -r $req
+
+# 5b) build backend for the editable install: --no-build-isolation imports the
+#     backend from the target venv, and pyproject pins setuptools==83.0.0 +
+#     wheel. Python 3.12+ venvs no longer seed setuptools via ensurepip, and
+#     the freeze may not carry them, so install explicitly (idempotent).
+& "$Out\hermes-agent\venv\Scripts\pip.exe" install --no-cache-dir "setuptools==83.0.0" wheel
 
 # 6) copy the hermes-agent source tree (drop git/tests/node artifacts)
 $excl = @('.git','tests','tests-js','node_modules','dist','*.egg-info','__pycache__','.venv','venv')
