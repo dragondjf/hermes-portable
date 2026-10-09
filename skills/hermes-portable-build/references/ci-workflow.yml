@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       hermes_ref:
-        description: 'hermes-agent SOURCE ref to package: a commit SHA or date-based tag (e.g. v2026.8.3). Leave EMPTY to install latest main. NOTE: this is NOT the packaging version number.'
+        description: 'hermes-agent SOURCE ref to package: a commit SHA or release tag (v0.21.6+ semver, or v2026.9.24 date-style). Leave EMPTY to use the HERMES_REF file at repo root (final fallback: latest main). NOTE: this is NOT the packaging version number.'
         required: false
         default: ''
       version_label:
@@ -23,20 +23,28 @@ jobs:
   # Linux (x64 + arm64) and macOS — official installer + repackage.
   # ---------------------------------------------------------------------------
   unix:
-    name: ${{ matrix.runner }} (${{ matrix.arch }})
+    name: ${{ matrix.runner }} (${{ matrix.arch }}) py${{ matrix.py }}
     strategy:
       fail-fast: false
       matrix:
+        # Single py per platform, pinned to the official PM runtime era.
+        # hermes v0.21.x installs its dependency env on Python 3.14
+        # (pm/lock.json) and its dep pins carry python_version >= '3.14'
+        # markers, so only a 3.14 bundle reproduces the official dep set.
         include:
           - runner: ubuntu-22.04
             arch: x64
+            py: '3.14'
           - runner: ubuntu-22.04-arm
             arch: arm64
+            py: '3.14'
           - runner: macos-latest
             arch: x64
+            py: '3.14'
     runs-on: ${{ matrix.runner }}
     env:
       HERMES_HOME: ${{ github.workspace }}/official-hermes
+      PY_VER: ${{ matrix.py }}
     steps:
       - name: Checkout this packaging repo
         uses: actions/checkout@v4
@@ -47,20 +55,24 @@ jobs:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v5
         with:
-          version: '0.11.28'
+          version: '0.12.3'
 
       - name: Official install (curl install.sh)
         shell: bash
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
-          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
-          # NOTE: hermes-agent source uses date-based tags (e.g. v2026.8.3) and commit SHAs,
-          # NOT semantic versions like 0.20.0 — so we never pass the packaging tag name as --commit.
-          COMMIT_ARG=""
-          if [ -n "${{ github.event.inputs.hermes_ref }}" ]; then
-            COMMIT_ARG="--commit ${{ github.event.inputs.hermes_ref }}"
+          # Pin to a real hermes-agent source ref: the workflow_dispatch input
+          # when given, else the HERMES_REF file committed at repo root (so v*
+          # tag builds are reproducible instead of tracking hermes main; the
+          # installer verifies the ref is on main via merge-base --is-ancestor).
+          REF="${{ github.event.inputs.hermes_ref }}"
+          if [ -z "$REF" ] && [ -f HERMES_REF ]; then
+            REF="$(tr -d '[:space:]' < HERMES_REF)"
           fi
+          COMMIT_ARG=""
+          [ -n "$REF" ] && COMMIT_ARG="--commit $REF"
+          echo "==> hermes-agent source ref: ${REF:-latest main}"
           curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
             | bash -s -- --hermes-home "$HERMES_HOME" $COMMIT_ARG --skip-setup --skip-browser
 
@@ -93,23 +105,30 @@ jobs:
       - name: Package artifact
         shell: bash
         run: |
-          tar czf "hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz" hermes-portable
+          tar czf "hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}-py${{ matrix.py }}.tar.gz" hermes-portable
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}.tar.gz
+          files: hermes-portable-${{ matrix.runner }}-${{ matrix.arch }}-py${{ matrix.py }}.tar.gz
           overwrite: true
 
   # ---------------------------------------------------------------------------
   # Windows.
   # ---------------------------------------------------------------------------
   windows:
-    name: windows-latest (x64)
+    name: windows-latest (x64) py${{ matrix.py }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # py pinned to the official PM runtime era (hermes v0.21.x = 3.14).
+        include:
+          - py: '3.14'
     env:
       HERMES_HOME: ${{ github.workspace }}\official-hermes
+      PY_VER: ${{ matrix.py }}
     steps:
       - name: Checkout this packaging repo
         uses: actions/checkout@v4
@@ -120,23 +139,30 @@ jobs:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v5
         with:
-          version: '0.11.28'
+          version: '0.12.3'
 
       - name: Official install (iex install.ps1)
         shell: pwsh
         env:
           HERMES_HOME: ${{ env.HERMES_HOME }}
         run: |
-          # Pin to a real hermes-agent source ref when given; otherwise install latest main.
+          # Pin to a real hermes-agent source ref: the workflow_dispatch input
+          # when given, else the HERMES_REF file committed at repo root (so v*
+          # tag builds are reproducible instead of tracking hermes main; the
+          # installer verifies the ref is on main via merge-base --is-ancestor).
+          $ref = "${{ github.event.inputs.hermes_ref }}".Trim()
+          if (-not $ref -and (Test-Path HERMES_REF)) {
+            $ref = (Get-Content HERMES_REF -Raw).Trim()
+          }
+          Write-Host "==> hermes-agent source ref: $(if ($ref) { $ref } else { 'latest main' })"
           # NOTE: download the installer to a file and invoke it with `&` — `iex (irm ...) -Arg`
           # passes -Arg to iex (which has no such param) and fails.
           # Official installer reads HERMES_HOME from the env (workflow sets it),
-          # so we only pass the -SkipSetup switch. Download to a file and invoke
-          # with `&` — avoids iex param-binding pitfalls. (Invoke-RestMethod has
-          # no -Encoding, so we rely on its default UTF-8 output.)
+          # so we only pass -SkipSetup (+ -Commit when pinning).
           $installPs1 = Join-Path $env:TEMP "hermes-install.ps1"
           irm https://hermes-agent.nousresearch.com/install.ps1 -OutFile $installPs1
-          & $installPs1 -SkipSetup
+          if ($ref) { & $installPs1 -Commit $ref -SkipSetup }
+          else      { & $installPs1 -SkipSetup }
 
       - name: Repackage into portable bundle
         shell: pwsh
@@ -168,11 +194,11 @@ jobs:
       - name: Package artifact
         shell: pwsh
         run: |
-          Compress-Archive -Path hermes-portable -DestinationPath "hermes-portable-windows-latest-x64.zip"
+          Compress-Archive -Path hermes-portable -DestinationPath "hermes-portable-windows-latest-x64-py${{ matrix.py }}.zip"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: hermes-portable-windows-latest-x64.zip
+          files: hermes-portable-windows-latest-x64-py${{ matrix.py }}.zip
           overwrite: true
